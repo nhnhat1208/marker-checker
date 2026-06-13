@@ -18,7 +18,6 @@ build/
 .agentbase/
 .agentbase-state.json
 *.credentials.json
-runtime.yaml
 
 # Dev tooling
 Makefile

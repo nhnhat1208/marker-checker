@@ -15,6 +15,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Copy source and install the project itself
 COPY marker_checker_agent/ ./marker_checker_agent/
 COPY main.py .
+COPY runtime.yaml .
 RUN uv sync --frozen --no-dev
 
 EXPOSE 8080
