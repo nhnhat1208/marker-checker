@@ -2,22 +2,24 @@
 
 ## Purpose
 
-This document records the proposed scope and channel decisions for the initial release and compares the available channel and integration approaches.
+This document records the locked scope and channel decisions for the initial release and preserves the comparison that led to them.
 
 The goal is not to choose the biggest design. The goal is to choose the approach most likely to produce a simple, correct, and useful first release.
 
+This is the primary decision record for the initial release. Other technical and delivery docs should follow this file instead of redefining the same choices.
+
 ## Decision Summary
 
-| Decision ID | Topic | Proposed Decision | Status |
+| Decision ID | Topic | Chosen Decision | Status |
 |---|---|---|---|
-| `DEC-001` | Delivery target | Build one simple but correct end-to-end first release | Recommended |
-| `DEC-002` | Primary channel | Use Telegram 1:1 as the first user-facing channel | Needs Confirmation |
-| `DEC-003` | Architecture | Keep a channel-agnostic workflow backend behind the bot | Recommended |
-| `DEC-004` | Group chat | Defer full group-review workflow until after the initial release | Recommended |
-| `DEC-005` | Web UI | Defer full web UI; allow only optional read-only support later if needed | Recommended |
-| `DEC-006` | AI review assistance | Defer diff analysis until the core workflow is already stable | Recommended |
-| `DEC-007` | Identity model | Store actor names and handles only; do not build RBAC in the initial release | Recommended |
-| `DEC-008` | Intake pattern | Use one simple natural-language request message as the primary intake pattern | Recommended |
+| `DEC-001` | Delivery target | Build one simple but correct end-to-end first release | Final |
+| `DEC-002` | Primary channel | Use Telegram 1:1 as the first user-facing channel | Final |
+| `DEC-003` | Architecture | Keep a channel-agnostic workflow backend behind the bot | Final |
+| `DEC-004` | Group chat | Defer full group-review workflow until after the initial release | Final |
+| `DEC-005` | Web UI | Defer full web UI and keep inspection in chat first | Final |
+| `DEC-006` | AI review assistance | Defer diff analysis until the core workflow is already stable | Final |
+| `DEC-007` | Identity model | Store actor names and channel-visible handles only; do not build RBAC in the initial release | Final |
+| `DEC-008` | Intake pattern | Use one simple natural-language request message as the primary intake pattern | Final |
 
 ## Evaluation Criteria
 
@@ -111,7 +113,7 @@ What it is good at:
 What makes it risky:
 
 - harder to distinguish commands from casual conversation
-- more ambiguity around which tagged person is the real approver
+- more ambiguity around which mentioned person is the real approver
 - harder audit mapping from noisy thread activity
 - higher chance of false or accidental workflow changes
 
@@ -195,9 +197,9 @@ Verdict:
 | Telegram 1:1 + read-only web | Medium | Medium | High | High | Optional |
 | Backend API only | Very High | Low | Low | High | Fallback only |
 
-## Recommended Initial Release Path
+## Locked Initial Release Path
 
-### Recommendation
+### Final Direction
 
 Build:
 
@@ -220,19 +222,6 @@ Defer:
 - It fits a lightweight handle-based identity model.
 - It avoids frontend scope explosion.
 - It still preserves a clean path to add web or group-chat adapters later.
-
-## Decisions That Still Need Explicit Confirmation
-
-These decisions have a clear recommendation, but they should still be recorded as final choices before implementation starts:
-
-If no alternative is explicitly approved, the team should use the recommendation in this table as the default path.
-
-| Decision | Choices | Recommendation | Why |
-|---|---|---|---|
-| Primary channel | Telegram 1:1, Slack DM, internal chat | Telegram 1:1 | Best fit for explicit chat workflow with low UI overhead |
-| Telegram transport | Long polling, webhook | Long polling | Lower setup complexity for the first release |
-| Read-only inspection surface | chat only, lightweight web view | chat only first | Keeps the core workflow focused |
-| Group chat support | initial release, later extension | later extension | Reduces ambiguity and audit noise |
 
 ## Features To Defer From The Initial Release
 

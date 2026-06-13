@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build an AI agent that manages an approval workflow for changes on platform objects and keeps a full audit trail for future lookup and review.
+Build a chat-first approval agent that manages requests for changes on platform objects and keeps a full audit trail for lookup and review.
 
 Primary business goals:
 
@@ -10,7 +10,6 @@ Primary business goals:
 - Notify and assist an approver to approve or reject the request.
 - Allow a `lookup user` to look up request status and history.
 - Persist the whole process for audit, compliance, and later investigation.
-- In a later AI review assistance stage, help approvers analyze the difference between `before` and `after` snapshots.
 
 This specification is written as an implementation-oriented product spec for an AgentBase-based chat agent.
 
@@ -18,7 +17,7 @@ This specification is written as an implementation-oriented product spec for an 
 
 ### In Scope For Initial Release
 
-- Lightweight multi-actor chat workflow using names and hashtags or handles.
+- Lightweight multi-actor chat workflow using names and channel-visible handles or user identifiers.
 - Request creation, review, approval, rejection, and status tracking.
 - Persistent audit history.
 - Exact request lookup and participant-safe history retrieval.
@@ -45,9 +44,9 @@ This design makes the most sense as a chat-first approval assistant with these b
 
 - One request represents one proposed change on one target object.
 - One requester starts the request.
-- One approver is tagged or mentioned in the request for the initial release.
+- One approver is identified by handle, mention, or another channel-visible identifier in the initial release.
 - The initial release does not require permission access storage or RBAC.
-- The initial release stores actor names and channel handles or hashtags instead of a formal identity directory.
+- The initial release stores actor names and channel handles or user identifiers instead of a formal identity directory.
 - A valid request cannot be submitted until the agent has:
   - requester channel identity
   - target label
@@ -61,7 +60,7 @@ This design makes the most sense as a chat-first approval assistant with these b
 - Every state-changing action must resolve to exactly one request.
 - Non-participants get summary-only lookup by default, and exact request ID lookup is the safest initial-release path.
 - Full request history is reserved for the requester or approver.
-- Rich execution tracking and permission modeling are deferred.
+- Rich execution tracking and permission modeling are out of scope for the initial release.
 
 ## Users and Roles
 
@@ -73,7 +72,7 @@ Main actions:
 
 - Send a change request in chat.
 - Describe the change from one state to another state.
-- Mention or tag the approver.
+- Mention the approver with a resolvable handle, mention, or channel-visible identifier.
 - Respond to approver questions.
 - View final outcome.
 
@@ -108,10 +107,9 @@ Main responsibilities:
 - Collect missing information from requester.
 - Normalize request data into a structured format.
 - Require a resolvable approver handle before submission.
-- Route the request to the tagged approver.
+- Route the request into the approver review flow for the chosen channel.
 - Keep all actions and messages in an audit timeline.
 - Help both sides understand the request.
-- In a later AI review assistance stage, analyze diffs and generate review insights.
 
 ## Success Criteria
 
@@ -125,8 +123,4 @@ Main responsibilities:
 - A lookup user can look up request history by exact request ID without seeing full participant details by default.
 - Every step is recorded in an audit trail.
 
-### Later-Stage AI Review Assistance
-
-- The agent can explain what changed between before and after snapshots.
-- The approver gets useful risk-aware review assistance.
-- AI analysis improves review speed without reducing audit quality.
+AI review assistance is a later extension and is documented separately in [AI Review Assistance](../future/ai-review-assistance.md).

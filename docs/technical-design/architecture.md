@@ -1,131 +1,244 @@
 # Technical Architecture
 
-## Architecture Overview
+## Goal
 
-Recommended logical components:
+Build one simple approval tool first:
 
-1. Chat Interface Layer
-2. Agent Orchestrator
-3. Request Service
-4. Audit Service
-5. Conversation Context Store
-6. Notification Service
-7. Optional AI Review Assistance Service
+- requester submits a change request
+- approver resolves it
+- lookup by request ID works
+- audit history explains what happened
 
-## Component Responsibilities
+The design should stay small until that workflow is proven useful.
 
-### Chat Interface Layer
+## Runtime Shape
 
-Handles direct chat conversations for requester, approver, and lookup users.
+```text
+Telegram User
+    ->
+TelegramAdapter
+    ->
+AgentOrchestrator
+    ->
+RequestService <-> AuditService
+    ->
+WorkflowStore
+    ->
+GoogleSheetsWorkflowStore
+    ->
+Google Sheets
+```
 
-### Agent Orchestrator
+## Implementation Stack
 
-Manages workflow state, message parsing, prompt behavior, and tool calls.
+Use one small, consistent stack for the first release.
 
-### Request Service
+### Language
 
-Stores request records and enforces state transitions.
+- Python `3.11`
 
-### Audit Service
+Why:
 
-Stores immutable event timeline and searchable evidence.
+- fast to iterate
+- good Telegram and Google API libraries
+- good fit for a small AgentBase service
 
-### Conversation Context Store
+### Runtime
 
-Maps one request ID to one or more actor-specific chat contexts so requester and approver chats resolve to the same workflow record.
+- `greennode-agentbase`
 
-### Notification Service
+Why:
 
-Sends review requests, reminders, and final outcomes.
+- already provides the runtime entrypoint and health interface needed for deployment
+- avoids adding another web framework unless real internal APIs are needed later
 
-### Optional AI Review Assistance Service
+### Core Libraries
 
-AI review assistance component for before/after analysis.
+- `pydantic`
+- `PyYAML`
+- `python-telegram-bot`
+- `gspread`
+- `google-auth`
 
-## Minimum Agent Tools
+Why:
 
-Recommended minimum tool/actions for the agent:
+- low boilerplate for configuration
+- mature Telegram and Google Sheets integrations
+- enough for the first useful workflow without extra framework weight
 
-- `ingest_channel_event`
-- `parse_request_message`
-- `validate_required_fields`
-- `resolve_approver_handle`
+## Core Components
+
+### Configuration Layer
+
+- load `runtime.yaml`
+- fall back to `runtime.example.yaml` when a local runtime file does not exist yet
+- apply optional runtime environment overrides when the deploy environment needs them
+- expose typed config to the runtime
+
+### TelegramAdapter
+
+- receive Telegram text and commands
+- normalize actor, chat, and message metadata
+- send replies
+- later send approver notifications
+
+### AgentOrchestrator
+
+- parse requester messages
+- manage pending confirmation draft
+- route approver actions
+- return normalized response payloads
+
+### RequestService
+
+- create request
+- resubmit after needs-info
+- approve, reject, cancel
+- enforce lifecycle rules through a finite state machine
+
+### AuditService
+
+- append immutable audit events
+- return timeline by request ID
+
+### WorkflowStore
+
+The persistence interface.
+
+Required operations:
+
+- `initialize`
 - `create_request`
 - `update_request`
-- `confirm_request_submission`
-- `store_request_revision`
-- `link_request_conversation`
-- `resolve_request_context`
-- `notify_approver`
-- `request_more_info`
-- `resubmit_request`
-- `cancel_request`
-- `record_approval`
-- `record_rejection`
 - `get_request`
-- `lookup_request`
-- `get_audit_timeline`
-- `notify_actor`
-- `analyze_diff` in later stages
+- `create_request_conversation`
+- `create_audit_event`
+- `list_audit_events`
 
-Each tool should return structured data so the agent can produce consistent chat responses.
+### GoogleSheetsWorkflowStore
 
-## Required Persistent Records
+The first concrete persistence adapter.
 
-The initial release should treat these records as required, not optional:
+Responsibilities:
+
+- authenticate with Google service account
+- open the configured spreadsheet
+- auto-create worksheets
+- map domain records to rows
+- keep Google Sheets detail out of workflow services
+
+## Persistence Decision
+
+### Chosen Now
+
+- `Google Sheets`
+
+### Why
+
+- no separate database deployment
+- easy shared access for a small internal team
+- enough for low-volume request and audit data
+
+### Tradeoffs
+
+- limited write throughput
+- weak fit for multi-replica concurrent writes
+- limited reporting compared with a SQL database
+
+Because of those tradeoffs, persistence is wrapped behind `WorkflowStore` from the start.
+
+## Configuration Pattern
+
+Use:
+
+- YAML for structured defaults
+- runtime environment variables only when deployment needs overrides
+
+Files:
+
+- `runtime.example.yaml`
+- local `runtime.yaml`
+
+Later only:
+
+- `ai-review.yaml`
+
+## Workflow State Control
+
+Use an explicit finite state machine in `RequestService`.
+
+Rules:
+
+- adapters must not mutate `review_status` directly
+- every transition goes through a service method
+- invalid transitions fail safely
+- terminal decisions are auditable
+
+## Minimum Persistent Records
+
+Keep three logical record sets:
 
 - `requests`
 - `audit_events`
 - `request_conversations`
 
-One of these revision storage approaches must also be chosen before implementation:
+That is enough for the first release.
 
-- store submitted revision snapshots inside `audit_events.event_payload`
-- add a dedicated `request_revisions` store and reference it from audit events
+## Minimal Technical Shape
 
-Recommended default:
+Keep the runtime intentionally small:
 
-- keep revision snapshots in `audit_events` for the first release if query needs are simple
-- add `request_revisions` immediately if approvers or auditors need clean revision-by-revision browsing
+- one Python service
+- one Telegram adapter
+- one `WorkflowStore` interface
+- one `GoogleSheetsWorkflowStore` implementation
+- one explicit state machine in `RequestService`
+- no separate web frontend
+- no separate worker
+- no separate AI service
 
-## Idempotency And Duplicate Delivery Handling
+## Deliberately Not Chosen Now
 
-Chat integrations will eventually deliver duplicate events, retry callbacks, or repeated button presses. The architecture should handle this explicitly.
+### SQL Database First
 
-Required behavior:
+Not chosen for the first release because:
 
-- Every inbound message or action should have a stable deduplication key such as `source_channel + channel_id + source_message_id + actor_handle`.
-- Reprocessing the same inbound event must not create a duplicate request.
-- Reprocessing the same approve, reject, cancel, or needs-info action must not create duplicate terminal or transition events.
-- If a repeated event is detected, the system should return the already-known request state or decision result as a safe no-op response.
-- Terminal decisions should be guarded by current `review_status` and `last_submitted_revision`.
+- adds deployment and operations overhead
+- the current product goal is still to prove the workflow itself
 
-Recommended implementation options:
+### FastAPI Or Another Extra Web Layer
 
-- lightweight inbox table for processed inbound events
-- unique constraints on channel event keys where the adapter supports them
-- idempotent state transition methods in the request service
+Not chosen now because:
 
-## Non-Functional Requirements
+- AgentBase runtime already covers the immediate server need
+- there is no required user-facing web surface yet
 
-- Audit records must be durable and queryable.
-- Request IDs must be unique and human-readable.
-- State transitions should be idempotent and auditable.
-- The system should support asynchronous chat and delayed responses.
-- The same request must be safely resolvable from multiple linked chat contexts.
-- The system should be observable with logs, metrics, and traceable request execution.
-- Latency should feel conversational for common chat actions.
-- The system should degrade safely if AI summarization fails.
+### LangChain Or LangGraph
 
-## Decisions Needed Before Implementation
+Not chosen now because:
 
-These choices affect the architecture and should be confirmed explicitly:
+- the first workflow does not need agentic planning
+- it would add architecture before proving the product feature
 
-If no explicit alternative is recorded, implementation should follow the recommended default.
+## Upgrade Path
 
-| Decision | Options | Recommended Default |
-|---|---|---|
-| Primary chat channel | Telegram 1:1, Slack DM, internal chat adapter | Telegram 1:1 |
-| Persistence mode | SQLite, PostgreSQL | PostgreSQL for shared internal deployment; SQLite only for a controlled single-instance environment |
-| Revision storage | `audit_events` payload only, separate `request_revisions` store | `audit_events` payload only unless revision browsing is a first-class need |
-| Telegram transport | Long polling, webhook | Long polling first |
+If the workflow is proven useful later:
+
+1. move persistence from Google Sheets to a SQL database if write volume or reporting needs grow
+2. add a read-only inspection UI
+3. add group-chat support
+4. add AI diff analysis
+
+## AI Placement Later
+
+AI review assistance is not part of the first release.
+
+When added later:
+
+- the orchestrator decides when to request AI analysis
+- an `AIReviewService` calls the model provider
+- AI output is advisory only
+- workflow state still stays in `RequestService`
+- keep the detailed future design in [AI Review Assistance](../future/ai-review-assistance.md)
+
+For locked release decisions, see [Scope And Channel Decision](./scope-and-channel-decision.md).

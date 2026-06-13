@@ -1,0 +1,29 @@
+app:
+  name: marker-checker-agent
+  env: local
+  log_level: INFO
+  primary_channel: telegram
+  request_id_prefix: REQ
+  persistence_backend: google_sheets
+
+workflow:
+  require_confirmation: true
+  reject_requires_reason: true
+  exact_lookup_only: true
+
+telegram:
+  enabled: true
+  polling_enabled: true
+  bot_token: ""
+  approver_notification_prefix: "Approval request"
+
+google_sheets:
+  enabled: true
+  spreadsheet_id: ""
+  service_account_file: ""
+  service_account_json_base64: ""
+  auto_create_worksheets: true
+  worksheets:
+    requests: requests
+    audit_events: audit_events
+    request_conversations: request_conversations

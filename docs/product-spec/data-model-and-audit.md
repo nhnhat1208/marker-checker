@@ -24,9 +24,9 @@ The agent should not create a real request until these fields are available:
 | `approver_handle` | Yes | Must be resolvable through the chosen chat channel |
 | `target_object_type` | No | Optional classification |
 | `business_reason` | No | Optional explanation |
-| `request_tags` | No | Optional labels or hashtags |
+| `request_tags` | No | Optional labels if the product adds them later |
 
-Recommended lightweight change summary fields:
+Current lightweight change summary fields:
 
 | Field | Description |
 |---|---|
@@ -35,25 +35,21 @@ Recommended lightweight change summary fields:
 | `change_from_summary` | Short summary of the current state |
 | `change_to_summary` | Short summary of the proposed state |
 
-## Request Model
-
-Recommended expanded request model:
+## Current First-Release Request Model
 
 | Field | Description |
 |---|---|
 | `request_id` | Unique request identifier |
 | `request_text` | Original requester message |
-| `title` | Optional short human-readable request title |
 | `requester_name` | Requester display name from the chat channel |
-| `requester_handle` | Requester handle, username, or hashtag from the chat channel |
+| `requester_handle` | Requester handle or user identifier from the chat channel |
 | `approver_name` | Approver display name if available |
-| `approver_handle` | Approver handle, username, or hashtag from the chat channel |
+| `approver_handle` | Approver handle or user identifier from the chat channel |
 | `target_label` | Human-readable target name or identifier |
 | `target_object_type` | Optional target object type |
 | `change_from_summary` | Short summary of the current state |
 | `change_to_summary` | Short summary of the proposed state |
 | `business_reason` | Optional explanation for why the change is needed |
-| `request_tags` | Hashtags or simple labels extracted from the chat |
 | `review_status` | Submitted, needs_info, approved, rejected, cancelled |
 | `current_revision` | Latest normalized request revision number |
 | `last_submitted_revision` | Revision number currently under review |
@@ -75,19 +71,15 @@ Recommended expanded request model:
 
 Audit users need more than status. They need sequence and evidence.
 
-The audit timeline should capture:
+The first-release audit timeline should capture:
 
 - `request_submitted`
-- `missing_fields_requested`
-- `request_draft_updated`
 - `approver_notified`
-- `approver_questioned`
-- `requester_responded`
 - `needs_info_requested`
 - `request_resubmitted`
 - `decision_recorded`
 - `request_cancelled`
-- `final_outcome_notified`
+- `lookup_performed`
 
 ## Audit Event Model
 
@@ -100,7 +92,7 @@ Every audit event should store:
 | `request_id` | Parent request |
 | `event_type` | Canonical event type such as `request_submitted`, `request_resubmitted`, `needs_info_requested`, `decision_recorded`, or `request_cancelled` |
 | `actor_name` | Display name of the actor who triggered it |
-| `actor_handle` | Handle, username, or hashtag of the actor who triggered it |
+| `actor_handle` | Handle or user identifier of the actor who triggered it |
 | `actor_kind` | Requester, approver, agent, or system |
 | `request_revision` | Revision number associated with the event, if applicable |
 | `occurred_at` | Event time |
@@ -110,19 +102,13 @@ Every audit event should store:
 | `thread_id` | Canonical thread or source thread identifier |
 | `source_message_id` | External message reference if triggered from chat |
 
-## Recommended Collections
+## Current Shared Record Sets
 
-Use at least two persistence layers or logical collections:
+Use these logical record sets in the first release:
 
 - `requests`
 - `audit_events`
-
-Recommended optional collections:
-
 - `request_conversations`
-- `notification_logs`
-- `request_revisions`
-- `ai_analysis_artifacts` for later stages
 
 ## Request Conversation Mapping
 
@@ -153,14 +139,6 @@ Each time the requester changes request content after `needs_info`, the system s
 
 This ensures the approver decision can always be traced to the exact submitted content.
 
-## Later-Stage AI Review Extension
+## Later AI Extension
 
-When AI review assistance is enabled later, the request model can be extended with:
-
-| Field | Description |
-|---|---|
-| `before_snapshot_ref` | Reference to the stored snapshot before change |
-| `after_snapshot_ref` | Reference to the proposed snapshot after change |
-| `snapshot_schema_version` | Version of snapshot structure used for diff and audit |
-| `change_type` | Structured change type for later analysis |
-| `ai_analysis_ref` | Reference to stored AI review output |
+If AI review assistance becomes active scope later, extend the request model and add AI artifact storage in [AI Review Assistance](../future/ai-review-assistance.md) rather than expanding the first-release model here.

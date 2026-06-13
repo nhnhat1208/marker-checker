@@ -2,7 +2,7 @@
 
 ## Review Lifecycle States
 
-Recommended `review_status` lifecycle:
+Current first-release `review_status` lifecycle:
 
 1. `submitted`
 2. `needs_info`
@@ -23,7 +23,7 @@ Recommended `review_status` lifecycle:
 
 ## Workflow Design Notes
 
-These workflow assumptions make the design coherent and implementable:
+These workflow assumptions define the first-release behavior:
 
 - Request creation starts from one natural-language message.
 - The preferred intake pattern is: "request change from ... to ..., ask @name to approve".
@@ -36,14 +36,39 @@ These workflow assumptions make the design coherent and implementable:
   - approver handle, mention, or other channel-resolvable identifier
 - A free-text approver display name alone is not enough for submission.
 - The initial release does not store RBAC or permission access for users.
-- The initial release stores names and handles or hashtags exactly as seen in the channel.
+- The initial release stores names and channel-visible handles exactly as seen in the channel.
 - A real request record is created only after the requester confirms the normalized summary.
 - Chat messages alone should not finalize approval unless the approver sends an explicit approval action.
 - One request can be linked to more than one chat context, such as requester direct chat and approver direct chat.
 - Explicit request ID wins when resolving context.
-- If a message is a reply inside a request-linked thread, the thread request is the active context.
 - If there is only one open request in the current chat for the actor, the agent may use it implicitly.
 - If more than one open request matches, the agent must ask the user to choose and must not guess.
+
+## Chat Interaction Rules
+
+The workflow is chat-first, but it still needs stable request context.
+
+- Required chat modes are `requester <-> agent`, `approver <-> agent`, and `lookup user <-> agent`.
+- Group-chat workflow is deferred from the initial release.
+- One request has one canonical request ID.
+- Natural-language request creation is the primary UX.
+- Slash commands are explicit action shortcuts, not the only supported path.
+- State-changing actions must resolve exactly one request.
+- For status-changing actions, explicit request ID is preferred.
+- If the channel uses separate requester and approver chats, both chats should still link back to the same request ID.
+- After every state-changing action, the agent should echo:
+  - request ID
+  - current `review_status`
+  - active revision when relevant
+- The final decision must be captured as an explicit approval action, not inferred only from vague chat text.
+
+## Current Explicit Actions
+
+- `/confirm` to submit a normalized draft
+- `/status` to show current workflow state
+- `/history` to show the request timeline
+- `/approve`, `/reject`, `/needinfo` as explicit approver actions
+- `/cancel` to cancel an active request before terminal resolution
 
 ## Workflow: Request Intake And Submission
 
@@ -57,14 +82,14 @@ Conversation flow:
    - target label or target summary
    - change-from summary
    - change-to summary
-   - approver handle or hashtag
+   - approver handle or other channel-visible identifier
 3. If any required submit field is missing, the agent asks only for the missing fields.
 4. If the requester provides only a free-text approver name, the agent asks for a resolvable handle or mention before continuing.
 5. When all required submit fields are available, the agent shows a normalized request summary and asks the requester to confirm.
 6. If the requester corrects the summary, the agent updates it and asks for confirmation again.
 7. Only after requester confirmation does the agent store the request and create the initial audit events.
 8. Agent creates a request ID, sets `review_status` to `submitted`, stores revision `1` as the first submitted snapshot, and links the current conversation context to the request.
-9. Agent notifies the approver and links the approver conversation context when the outbound message is sent.
+9. Agent records the approver review target and routes the request into the active approver review flow for the chosen channel.
 
 Expected output from agent:
 
@@ -72,7 +97,7 @@ Expected output from agent:
 - A request ID.
 - The submitted revision number.
 - Current `review_status`.
-- Confirmation that the approver has been notified.
+- Confirmation that the request has been routed for approver review.
 
 ## Workflow: Approver Decision And Resolution
 
@@ -80,7 +105,7 @@ Expected output from agent:
 
 Conversation flow:
 
-1. Agent notifies the tagged approver in a direct thread or request-linked thread.
+1. Agent surfaces the submitted request to the approver through the chosen channel flow.
 2. Agent presents:
    - Request summary
    - request ID
@@ -104,6 +129,13 @@ Expected output from agent:
 - Decision rationale.
 - Updated `review_status`.
 - Immutable audit event for the decision.
+
+Approver-facing behavior should stay simple:
+
+- present a concise review packet
+- highlight missing data
+- keep the approver focused on request ID and change summary
+- encourage explicit approve or reject actions rather than vague replies such as "looks good"
 
 ## Workflow: Needs-Info Revision Loop
 
@@ -152,16 +184,14 @@ Recommended linked contexts:
 - requester origin chat
 - requester follow-up chat for `needs_info`
 - approver review chat
-- optional shared thread if the channel supports it
 
 Each linked context should map back to the same canonical request ID.
 
 The agent must resolve request context using this priority:
 
 1. explicit request ID in the message
-2. reply-to or thread-linked request context
-3. request-to-conversation mapping for the current actor and current chat
-4. exactly one open request in the current chat for that actor
+2. request-to-conversation mapping for the current actor and current chat
+3. exactly one open request in the current chat for that actor
 
 If none of the above resolve to one request, the agent must:
 
