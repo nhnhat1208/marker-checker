@@ -12,36 +12,41 @@ class RoutedIntent:
     request_id: str
     note: str = ""
     text: str = ""
+    target_name: str = ""
 
 
 class FreeformIntentRouter:
-    _REQUEST_ID_PATTERN = r"(?P<request_id>[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)"
+    # Requires at least one digit in the final segment — matches REQ-A3F2C891
+    # but not plain hyphenated words like api-gateway or nginx-config.
+    _REQUEST_ID_PATTERN = r"(?P<request_id>[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-[A-Za-z0-9]*\d[A-Za-z0-9]*)"
     _LOOKUP_PATTERN = re.compile(
-        rf"^(?:(?:/)?status|lookup|check|show|show\s+request|xem|xem\s+request|xem\s+trang\s+thai|trang\s+thai)\s+{_REQUEST_ID_PATTERN}\s*$",
+        rf"^(?:(?:/)?status|lookup|check|show|show\s+request)\s+{_REQUEST_ID_PATTERN}\s*$",
         re.IGNORECASE,
     )
     _HISTORY_PATTERN = re.compile(
-        rf"^(?:(?:/)?history|timeline|lich\s+su|xem\s+lich\s+su|show\s+history)\s+{_REQUEST_ID_PATTERN}\s*$",
+        rf"^(?:(?:/)?history|timeline|show\s+history)\s+{_REQUEST_ID_PATTERN}\s*$",
         re.IGNORECASE,
     )
     _CANCEL_PATTERN = re.compile(
-        rf"^(?:(?:/)?cancel|huy|huy\s+request|cancel\s+request)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
+        rf"^(?:(?:/)?cancel|cancel\s+request)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
         re.IGNORECASE,
     )
     _NEEDINFO_PATTERN = re.compile(
-        rf"^(?:(?:/)?needinfo|need\s+info|need\s+more\s+info|ask\s+for\s+more\s+info|bo\s+sung\s+thong\s+tin|can\s+bo\s+sung)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
+        rf"^(?:(?:/)?needinfo|need\s+info|need\s+more\s+info|ask\s+for\s+more\s+info)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
         re.IGNORECASE,
     )
     _RESUBMIT_PATTERN = re.compile(
-        rf"^(?:(?:/)?resubmit|gui\s+lai|nop\s+lai)\s+{_REQUEST_ID_PATTERN}\s+(?P<text>.+)\s*$",
+        rf"^(?:(?:/)?resubmit)\s+{_REQUEST_ID_PATTERN}\s+(?P<text>.+)\s*$",
         re.IGNORECASE,
     )
     _MY_PENDING_PATTERN = re.compile(
-        r"^(?:my\s+(?:pending|open)\s+requests|my\s+requests|requests\s+for\s+me|danh\s+sach\s+request\s+cua\s+toi|request\s+cua\s+toi)\s*$",
+        r"^(?:my\s+(?:pending|open)\s+requests|my\s+requests|requests\s+for\s+me"
+        r"|(?:list|show)(?:\s+my)?\s+requests?)\s*$",
         re.IGNORECASE,
     )
     _PENDING_APPROVALS_PATTERN = re.compile(
-        r"^(?:what\s+needs\s+approval|pending\s+approvals|my\s+approvals|what\s+should\s+i\s+approve|requests\s+to\s+approve|can\s+i\s+approve\s+something|request\s+can\s+duyet|cho\s+duyet|request\s+cho\s+toi\s+duyet)\s*$",
+        r"^(?:what\s+needs\s+approval|pending\s+approvals|my\s+approvals"
+        r"|what\s+should\s+i\s+approve|requests\s+to\s+approve|can\s+i\s+approve\s+something)\s*$",
         re.IGNORECASE,
     )
 

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
 from typing import Protocol
 
-import httpx
-
+from marker_checker_agent.ai.llm_client import LLMClient
 from marker_checker_agent.ai.prompts import (
     INTENT_CLASSIFY_SYSTEM_PROMPT,
     REQUEST_ACTION_RESULT_SYSTEM_PROMPT,
@@ -27,7 +25,10 @@ from marker_checker_agent.ai.prompts import (
 from marker_checker_agent.ai.types import (
     MANAGEMENT_OPERATIONS,
     AssistedParseResult,
-    ClassifiedIntent,
+    IntentManagement,
+    IntentNewRequest,
+    IntentResult,
+    IntentUnknown,
 )
 from marker_checker_agent.config import AIConfig
 from marker_checker_agent.domain.enums import Operation
@@ -38,32 +39,13 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RequestInputAssistant(Protocol):
-    def classify_intent(self, text: str) -> ClassifiedIntent:
-        ...
-
-    def assist_request_text(self, text: str) -> AssistedParseResult:
-        ...
-
-    def generate_clarification_message(
-        self,
-        *,
-        original_message: str,
-        missing_fields: list[str],
-        validation_errors: list[str],
-    ) -> str | None:
-        ...
-
-    def generate_confirmation_message(self, *, parsed_request_summary: str) -> str | None:
-        ...
-
-    def generate_status_summary(self, *, request_summary: str) -> str | None:
-        ...
-
-    def generate_history_summary(self, *, request_history: str) -> str | None:
-        ...
-
-    def generate_action_result_message(self, *, action_result: str) -> str | None:
-        ...
+    def classify_intent(self, text: str) -> IntentResult: ...
+    def assist_request_text(self, text: str) -> AssistedParseResult: ...
+    def generate_clarification_message(self, *, original_message: str, missing_fields: list[str], validation_errors: list[str]) -> str | None: ...
+    def generate_confirmation_message(self, *, parsed_request_summary: str) -> str | None: ...
+    def generate_status_summary(self, *, request_summary: str) -> str | None: ...
+    def generate_history_summary(self, *, request_history: str) -> str | None: ...
+    def generate_action_result_message(self, *, action_result: str) -> str | None: ...
 
 
 class OpenAICompatibleInputAssistant:
@@ -71,44 +53,62 @@ class OpenAICompatibleInputAssistant:
 
     def __init__(self, config: AIConfig) -> None:
         self._config = config
+        self._client = LLMClient(config)
 
-    def classify_intent(self, text: str) -> ClassifiedIntent:
+    def classify_intent(self, text: str) -> IntentResult:
         try:
-            content = self._invoke_completion_content(
+            payload = self._client.complete_json(
                 system_prompt=INTENT_CLASSIFY_SYSTEM_PROMPT,
                 user_prompt=build_intent_classify_user_prompt(text),
-                max_tokens=80,
+                max_tokens=self._config.max_tokens,
             )
-            payload = self._parse_json_content(content)
         except Exception as exc:
             LOGGER.warning("LLM intent classification failed model=%s error=%s", self._config.model, exc)
-            return ClassifiedIntent(operation=Operation.UNKNOWN)
+            return IntentUnknown()
 
         try:
             operation = Operation(payload.get("operation", "").strip().lower())
         except ValueError:
             operation = Operation.UNKNOWN
-        if operation not in MANAGEMENT_OPERATIONS and operation != Operation.NEW_REQUEST:
-            operation = Operation.UNKNOWN
-        return ClassifiedIntent(
-            operation=operation,
-            request_id=payload.get("request_id", "").strip(),
-            note=payload.get("note", "").strip(),
-            text=payload.get("text", "").strip(),
-        )
+
+        if operation in MANAGEMENT_OPERATIONS:
+            return IntentManagement(
+                operation=operation,
+                request_id=payload.get("request_id", "").strip(),
+                target_name=payload.get("target_name", "").strip(),
+                note=payload.get("note", "").strip(),
+                text=payload.get("text", "").strip(),
+            )
+        if operation == Operation.NEW_REQUEST:
+            raw = ParsedRequest(
+                target_label=payload.get("target_label", "").strip(),
+                change_from_summary=payload.get("change_from_summary", "").strip(),
+                change_to_summary=payload.get("change_to_summary", "").strip(),
+                approver_handle=self._normalize_approver_handle(payload.get("approver_handle", "")),
+            )
+            validated, _ = self._validate_parsed_request(raw)
+            return IntentNewRequest(
+                target_label=validated.target_label,
+                change_from_summary=validated.change_from_summary,
+                change_to_summary=validated.change_to_summary,
+                approver_handle=validated.approver_handle,
+                guidance_message=payload.get("guidance_message", "").strip(),
+            )
+        return IntentUnknown()
 
     def assist_request_text(self, text: str) -> AssistedParseResult:
         started_at = time.perf_counter()
         try:
-            payload = self._invoke_model(text)
-        except Exception as exc:  # pragma: no cover
+            payload = self._client.complete_json(
+                system_prompt=REQUEST_PARSE_SYSTEM_PROMPT,
+                user_prompt=build_request_parse_user_prompt(text),
+                max_tokens=self._config.max_tokens,
+            )
+        except Exception as exc:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             LOGGER.warning(
                 "LLM input assistance failed model=%s prompt_version=%s latency_ms=%s error=%s",
-                self._config.model,
-                self._config.prompt_version,
-                latency_ms,
-                exc,
+                self._config.model, self._config.prompt_version, latency_ms, exc,
             )
             return AssistedParseResult(
                 parsed_request=None,
@@ -122,9 +122,7 @@ class OpenAICompatibleInputAssistant:
             target_label=payload.get("target_label", "").strip(),
             change_from_summary=payload.get("change_from_summary", "").strip(),
             change_to_summary=payload.get("change_to_summary", "").strip(),
-            approver_handle=self._normalize_approver_handle(
-                payload.get("approver_handle", "")
-            ),
+            approver_handle=self._normalize_approver_handle(payload.get("approver_handle", "")),
         )
         parsed, validation_errors = self._validate_parsed_request(parsed)
         missing_fields = list_missing_required_fields(parsed)
@@ -132,16 +130,12 @@ class OpenAICompatibleInputAssistant:
 
         if missing_fields:
             guidance_message = payload.get("guidance_message") or self._build_guidance_message(
-                missing_fields,
-                validation_errors,
+                missing_fields, validation_errors,
             )
             LOGGER.info(
                 "LLM input assistance incomplete model=%s prompt_version=%s latency_ms=%s missing_fields=%s validation_errors=%s",
-                self._config.model,
-                self._config.prompt_version,
-                latency_ms,
-                ",".join(missing_fields),
-                validation_errors,
+                self._config.model, self._config.prompt_version, latency_ms,
+                ",".join(missing_fields), validation_errors,
             )
             return AssistedParseResult(
                 parsed_request=parsed,
@@ -156,11 +150,8 @@ class OpenAICompatibleInputAssistant:
 
         LOGGER.info(
             "LLM input assistance succeeded model=%s prompt_version=%s latency_ms=%s target=%s approver=%s",
-            self._config.model,
-            self._config.prompt_version,
-            latency_ms,
-            parsed.target_label,
-            parsed.approver_handle,
+            self._config.model, self._config.prompt_version, latency_ms,
+            parsed.target_label, parsed.approver_handle,
         )
         return AssistedParseResult(
             parsed_request=parsed,
@@ -179,7 +170,7 @@ class OpenAICompatibleInputAssistant:
         missing_fields: list[str],
         validation_errors: list[str],
     ) -> str | None:
-        return self._generate_text_message(
+        return self._generate_text(
             system_prompt=REQUEST_CLARIFICATION_SYSTEM_PROMPT,
             user_prompt=build_clarification_user_prompt(
                 original_message=original_message,
@@ -190,106 +181,45 @@ class OpenAICompatibleInputAssistant:
         )
 
     def generate_confirmation_message(self, *, parsed_request_summary: str) -> str | None:
-        return self._generate_text_message(
+        return self._generate_text(
             system_prompt=REQUEST_CONFIRMATION_SYSTEM_PROMPT,
-            user_prompt=build_confirmation_user_prompt(
-                parsed_request_summary=parsed_request_summary
-            ),
+            user_prompt=build_confirmation_user_prompt(parsed_request_summary=parsed_request_summary),
             max_tokens=min(self._config.max_tokens, 160),
         )
 
     def generate_status_summary(self, *, request_summary: str) -> str | None:
-        return self._generate_text_message(
+        return self._generate_text(
             system_prompt=REQUEST_STATUS_SUMMARY_SYSTEM_PROMPT,
             user_prompt=build_status_summary_user_prompt(request_summary=request_summary),
             max_tokens=min(self._config.max_tokens, 120),
         )
 
     def generate_history_summary(self, *, request_history: str) -> str | None:
-        return self._generate_text_message(
+        return self._generate_text(
             system_prompt=REQUEST_HISTORY_SUMMARY_SYSTEM_PROMPT,
             user_prompt=build_history_summary_user_prompt(request_history=request_history),
             max_tokens=min(self._config.max_tokens, 120),
         )
 
     def generate_action_result_message(self, *, action_result: str) -> str | None:
-        return self._generate_text_message(
+        return self._generate_text(
             system_prompt=REQUEST_ACTION_RESULT_SYSTEM_PROMPT,
             user_prompt=build_action_result_user_prompt(action_result=action_result),
             max_tokens=min(self._config.max_tokens, 120),
         )
 
-    def _invoke_model(self, text: str) -> dict[str, str]:
-        content = self._invoke_completion_content(
-            system_prompt=REQUEST_PARSE_SYSTEM_PROMPT,
-            user_prompt=build_request_parse_user_prompt(text),
-            max_tokens=self._config.max_tokens,
-        )
-        return self._parse_json_content(content)
-
-    def _generate_text_message(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        max_tokens: int,
-    ) -> str | None:
+    def _generate_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int) -> str | None:
         try:
-            content = self._invoke_completion_content(
+            return self._client.complete_text(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=max_tokens,
-            )
-        except Exception as exc:  # pragma: no cover
+            ).strip() or None
+        except Exception as exc:
             LOGGER.warning(
-                "LLM UX message generation failed model=%s prompt_version=%s error=%s",
-                self._config.model,
-                self._config.prompt_version,
-                exc,
+                "LLM UX message generation failed model=%s error=%s", self._config.model, exc,
             )
             return None
-        return content.strip() or None
-
-    def _invoke_completion_content(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        max_tokens: int,
-    ) -> str:
-        response = httpx.post(
-            f"{self._config.base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self._config.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self._config.model,
-                "max_tokens": max_tokens,
-                "temperature": self._config.temperature,
-                "top_p": self._config.top_p,
-                "presence_penalty": self._config.presence_penalty,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            },
-            timeout=self._config.timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return payload["choices"][0]["message"]["content"]
-
-    def _parse_json_content(self, content: str) -> dict[str, str]:
-        normalized = content.strip()
-        if normalized.startswith("```"):
-            normalized = normalized.removeprefix("```json").removeprefix("```").strip()
-            if normalized.endswith("```"):
-                normalized = normalized[:-3].strip()
-        parsed = json.loads(normalized)
-        if not isinstance(parsed, dict):
-            raise ValueError("LLM response was not a JSON object.")
-        return {str(key): str(value or "") for key, value in parsed.items()}
 
     def _normalize_approver_handle(self, value: str) -> str:
         normalized = value.strip()
@@ -338,11 +268,7 @@ class OpenAICompatibleInputAssistant:
             validation_errors,
         )
 
-    def _build_guidance_message(
-        self,
-        missing_fields: list[str],
-        validation_errors: list[str],
-    ) -> str:
+    def _build_guidance_message(self, missing_fields: list[str], validation_errors: list[str]) -> str:
         parts: list[str] = []
         if validation_errors:
             parts.append("; ".join(validation_errors))

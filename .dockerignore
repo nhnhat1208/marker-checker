@@ -22,7 +22,6 @@ runtime.yaml
 
 # Dev tooling
 Makefile
-uv.lock
 .python-version
 .pytest_cache/
 .mypy_cache/

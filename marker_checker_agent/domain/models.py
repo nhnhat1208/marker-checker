@@ -2,9 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from marker_checker_agent.time_utils import utc_now
+
+
+class RequestSummary(TypedDict):
+    request_id: str
+    requester_handle: str
+    approver_handle: str
+    target_label: str
+    change_from_summary: str
+    change_to_summary: str
+    review_status: str
+    current_revision: int
+    last_submitted_revision: int
+    updated_at: str
 
 
 @dataclass(slots=True)

@@ -1,162 +1,110 @@
 # Configuration And Integrations
 
-## Configuration Goal
-
-Keep configuration small, explicit, and easy to move between local development and AgentBase deployment.
+## Configuration Pattern
 
 Use:
 
-- one YAML file as the primary configuration source
-- `pydantic-settings` for automatic env var override (no manual override code)
+- `runtime.yaml` for local config
+- `runtime.example.yaml` as the committed template
+- `.agentbase/deploy.env` for deploy-time overrides
 
-## Recommended Files
+The application loads YAML first, then applies environment variable overrides.
 
-- `runtime.yaml` — local working config (not committed)
-- `runtime.example.yaml` — committed template, secret-free
+## Main Config Areas
 
-## Config Classes
+### App
 
-Each class maps to a YAML section and an env prefix. Environment variables at that prefix override YAML values automatically.
+- app name
+- log level
+- request ID prefix
 
-| Class | YAML key | Env prefix |
-| --- | --- | --- |
-| `AppConfig` | `app` | — |
-| `WorkflowConfig` | `workflow` | — |
-| `TelegramConfig` | `telegram` | `TELEGRAM_` |
-| `GoogleSheetsConfig` | `google_sheets` | `GOOGLE_SHEETS_` |
-| `AIConfig` | `ai` | `AI_` |
+### Workflow
 
-## Core Config Areas
+- require confirmation
+- require rejection reason
+- exact lookup behavior
 
-### Application Runtime
+### Telegram Config
 
-```yaml
-app:
-  name: "marker-checker-agent"
-  env: "local"
-  log_level: "INFO"
-  primary_channel: "telegram"
-  request_id_prefix: "REQ"
-  persistence_backend: "google_sheets"
-```
+- enabled
+- polling enabled
+- bot token
 
-### Workflow Rules
+### Google Sheets Config
 
-```yaml
-workflow:
-  require_confirmation: true
-  reject_requires_reason: true
-  exact_lookup_only: true
-```
+- enabled
+- spreadsheet ID
+- service account file or base64 JSON
+- worksheet names
 
-### Telegram Integration
+### AI
 
-```yaml
-telegram:
-  enabled: true
-  polling_enabled: true
-  bot_token: ""
-```
+- enabled
+- model
+- base URL
+- API key
+- token and timeout tuning
 
-Env overrides: `TELEGRAM_ENABLED`, `TELEGRAM_POLLING_ENABLED`, `TELEGRAM_BOT_TOKEN`
+## Main Integrations
 
-### Google Sheets Integration
+### Telegram
 
-```yaml
-google_sheets:
-  enabled: true
-  spreadsheet_id: ""
-  service_account_file: ""
-  service_account_json_base64: ""
-  auto_create_worksheets: true
-  worksheets:
-    requests: "requests"
-    audit_events: "audit_events"
-    request_conversations: "request_conversations"
-```
+Used for:
 
-Env overrides:
+- request intake
+- approval actions
+- status and history lookup
 
-| Variable | Field |
-| --- | --- |
-| `GOOGLE_SHEETS_ENABLED` | `enabled` |
-| `GOOGLE_SHEETS_SPREADSHEET_ID` | `spreadsheet_id` |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | `service_account_file` |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | `service_account_json_base64` |
-| `GOOGLE_SHEETS_AUTO_CREATE_WORKSHEETS` | `auto_create_worksheets` |
+### Google Sheets
 
-Note: `GOOGLE_SERVICE_ACCOUNT_FILE` and `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` do not follow the `GOOGLE_SHEETS_` prefix because they predate it. Both spellings are accepted via `AliasChoices`.
+Used for:
 
-### AI / LLM Integration
+- requests
+- audit events
+- request conversation links
 
-```yaml
-ai:
-  enabled: false
-  model: ""
-  base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
-  api_key: ""
-  prompt_version: "request-parse-v1"
-  max_tokens: 800
-  temperature: 0.0
-  top_p: 0.95
-  timeout_seconds: 15.0
-  presence_penalty: 0.0
-```
+### LLM Provider
 
-Env overrides:
+Optional.
 
-| Variable | Field |
-| --- | --- |
-| `AI_ENABLED` | `enabled` |
-| `AI_MODEL` | `model` |
-| `AI_BASE_URL` | `base_url` |
-| `AI_API_KEY` | `api_key` |
-| `AI_PROMPT_VERSION` | `prompt_version` |
-| `AI_MAX_TOKENS` | `max_tokens` |
-| `AI_TEMPERATURE` | `temperature` |
-| `AI_TOP_P` | `top_p` |
-| `AI_TIMEOUT_SECONDS` | `timeout_seconds` |
-| `AI_PRESENCE_PENALTY` | `presence_penalty` |
+Used for:
 
-When `AI_ENABLED=true`, the agent activates:
+- request parsing help
+- clarification and summary wording
 
-1. **Intent classification** — classify management operations from freeform text (max 80 tokens)
-2. **Request parsing** — extract structured fields when regex pattern fails
+The workflow still works without AI.
+
+## Container and Deployment
+
+The `Dockerfile` uses `uv` (not pip) for dependency installation:
+
+- `uv sync --frozen --no-dev` pins exact versions from `uv.lock`
+- Dependencies are installed in a separate layer before source copy — rebuilds only re-install when `pyproject.toml` or `uv.lock` change
+- `PYTHONUNBUFFERED=1` ensures logs flush immediately to container stdout
+
+Deploy target is GreenNode AgentBase Runtime (Custom Agent). The runtime auto-injects `GREENNODE_CLIENT_ID`, `GREENNODE_CLIENT_SECRET`, `GREENNODE_AGENT_IDENTITY`, `GREENNODE_ENDPOINT_URL` — do not set these in the env file.
+
+The `uv.lock` file must not be in `.dockerignore` — it is required for reproducible builds.
 
 ## Secret Handling
 
-Keep these out of committed YAML:
+Do not commit:
 
-- `TELEGRAM_BOT_TOKEN`
-- `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` / `GOOGLE_SERVICE_ACCOUNT_FILE`
-- `AI_API_KEY`
+- Telegram bot token
+- Google service account credentials
+- AI API key
 
-Recommended patterns:
+Recommended:
 
-- local dev: use `service_account_file` path in `runtime.yaml`
-- deploy: use `.agentbase/deploy.env` with `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`
+- local: keep secrets in `runtime.yaml`
+- deploy: keep secrets in `.agentbase/deploy.env`
 
-## Integration Pattern
+## Integration Rule
 
-Follow a ports-and-adapters structure:
+External integrations should stay behind interfaces.
 
-1. workflow core (`RequestService`, `AuditService`)
-2. integration interfaces (`WorkflowStore`, `RequestInputAssistant`)
-3. provider-specific implementations (`GoogleSheetsWorkflowStore`, `OpenAICompatibleInputAssistant`)
+That keeps:
 
-## Integration Rules
-
-- workflow services must not depend directly on vendor SDK types
-- provider-specific auth and payload mapping stay inside adapters
-- state must be persisted before outbound notifications are treated as complete
-- request and audit logic must not know Google Sheets row details
-
-## Google Sheets Notes
-
-- use one spreadsheet as the shared source of truth
-- use one worksheet per logical record set
-- share the spreadsheet with the service-account email
-- keep one runtime replica to avoid write contention
-- auto-create worksheets is safe for first setup; worksheet names are explicit in YAML
-
-For locked release decisions, see [Scope And Channel Decision](./scope-and-channel-decision.md).
+- workflow logic independent from vendor SDKs
+- storage replaceable later
+- AI optional instead of central to the system

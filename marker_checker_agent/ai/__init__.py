@@ -8,13 +8,19 @@ from marker_checker_agent.ai.assistant import (
 from marker_checker_agent.ai.types import (
     MANAGEMENT_OPERATIONS,
     AssistedParseResult,
-    ClassifiedIntent,
+    IntentManagement,
+    IntentNewRequest,
+    IntentResult,
+    IntentUnknown,
 )
 
 __all__ = [
     "MANAGEMENT_OPERATIONS",
     "AssistedParseResult",
-    "ClassifiedIntent",
+    "IntentManagement",
+    "IntentNewRequest",
+    "IntentResult",
+    "IntentUnknown",
     "RequestInputAssistant",
     "OpenAICompatibleInputAssistant",
     "build_input_assistant",

@@ -2,187 +2,108 @@
 
 ## Goal
 
-Build one simple approval tool first:
+Keep the system small and easy to operate.
 
-- requester submits a change request
-- approver resolves it
-- lookup by request ID works
-- audit history explains what happened
+The first release only needs:
 
-The design should stay small until that workflow is proven useful.
+- one agent runtime
+- one Telegram adapter
+- one workflow core
+- one persistence backend
+- one optional LLM layer
 
-## Runtime Shape
+## Concept Diagram
 
-```text
-Telegram User
-    ->
-TelegramAdapter
-    ->
-AgentOrchestrator
-    |-> FreeformIntentRouter   (regex, fast path)
-    |-> RequestInputAssistant  (LLM: intent classify + request parse, optional)
-    ->
-RequestService <-> AuditService
-    ->
-WorkflowStore
-    ->
-GoogleSheetsWorkflowStore
-    ->
-Google Sheets
+```mermaid
+flowchart LR
+    A[Telegram User or API Caller] --> B[Agent Runtime]
+    B --> C[Telegram Adapter / API Entrypoint]
+    C --> D[Agent Orchestrator]
+    D --> E[Request Service]
+    D --> F[Audit Service]
+    D -. optional .-> G[LLM Assistance]
+    E --> H[Google Sheets Store]
+    F --> H
 ```
 
-## Package Structure
+## Main Layers
 
-```text
-marker_checker_agent/
-├── config.py          — typed config with pydantic-settings env override
-├── orchestrator.py    — message routing and draft lifecycle
-├── runtime.py         — AgentBase entrypoint wiring
-├── time_utils.py
-├── ai/
-│   ├── types.py       — ClassifiedIntent, AssistedParseResult, MANAGEMENT_OPERATIONS
-│   ├── prompts.py     — all LLM system prompts and user prompt builders
-│   └── assistant.py   — RequestInputAssistant protocol + OpenAI-compatible impl
-├── parsing/
-│   ├── intent_router.py   — FreeformIntentRouter: regex-based operation routing
-│   └── request_parser.py  — ParsedRequest, parse_request_text
-├── domain/
-│   ├── enums.py       — ReviewStatus, AuditEventType, Operation, ResponseStatus
-│   └── models.py      — RequestRecord, AuditEventRecord, RequestConversationRecord
-├── services/
-│   ├── request_service.py — lifecycle FSM, create/approve/reject/cancel/resubmit
-│   └── audit_service.py   — append-only audit events
-├── persistence/
-│   ├── base.py            — WorkflowStore interface
-│   ├── google_sheets.py   — GoogleSheetsWorkflowStore
-│   └── google_sheets_mapper.py
-└── adapters/
-    └── telegram_adapter.py
-```
+### Channel Layer
 
-## Implementation Stack
+- Telegram adapter
+- API invocation entrypoint
 
-### Language
+This layer only receives messages and sends responses.
 
-- Python `3.11+`
+### Workflow Layer
 
-### Dependency Management
+- `AgentOrchestrator`
+- `RequestService`
+- `AuditService`
 
-- `uv` + `pyproject.toml`
+This layer owns request flow, transitions, and audit behavior.
 
-### Runtime
+### AI Layer
 
-- `greennode-agentbase`
+- optional LLM assistance
 
-### Core Libraries
+This layer is advisory only. It helps with parsing and wording, but it does not own workflow state.
 
-| Library | Purpose |
+### Persistence Layer
+
+- `WorkflowStore`
+- `GoogleSheetsWorkflowStore`
+
+This layer hides storage details from workflow code.
+
+## Key Design Rules
+
+- workflow state is rule-based
+- adapters do not change request state directly
+- AI is optional and non-authoritative
+- Google Sheets is behind an abstraction so it can be replaced later
+
+## Main Components
+
+| Component | Responsibility |
 | --- | --- |
-| `pydantic` | Typed config models and domain validation |
-| `pydantic-settings` | Automatic env var override for config classes |
-| `PyYAML` | YAML config file loading |
-| `python-telegram-bot` | Telegram polling and command handling |
-| `gspread` + `google-auth` | Google Sheets persistence |
-| `httpx` | HTTP client for LLM API calls |
+| `TelegramAdapter` | Telegram polling and command handling |
+| `AgentOrchestrator` | route messages and coordinate workflow |
+| `RequestService` | create and transition requests |
+| `AuditService` | append and read audit events |
+| `RequestInputAssistant` | optional LLM parsing and response help |
+| `GoogleSheetsWorkflowStore` | persist requests and audit history |
 
-## Core Components
+## In-Memory State and Caching
 
-### Configuration Layer
+The orchestrator keeps session state in bounded TTL caches using `cachetools`:
 
-- load `runtime.yaml`, fall back to `runtime.example.yaml`
-- each config class (`TelegramConfig`, `GoogleSheetsConfig`, `AIConfig`) extends `pydantic-settings` `BaseSettings` with an env prefix — env vars override YAML values automatically
-- `_validate_runtime_config` enforces required fields at startup with clear error messages
+| Cache | Purpose | Eviction |
+| --- | --- | --- |
+| `_pending_drafts` | draft waiting for `/confirm` | 1 hour TTL, max 256 entries |
+| `_pending_resubmit` | contextual resubmit after NEEDINFO | 24 hour TTL, max 256 entries |
+| `_partial_drafts` | mid-conversation MISSING_FIELDS follow-up | 5 min TTL, max 256 entries |
 
-### FreeformIntentRouter
+The Telegram adapter keeps a `_chat_registry` (handle → chat_id) as an `LRUCache` (max 4096 entries, no TTL).
 
-- fast regex-based routing for management operations (lookup, history, cancel, needinfo, resubmit, my_pending, pending_approvals)
-- supports both English and Vietnamese keywords
-- returns `RoutedIntent(operation: Operation, request_id, note, text)`
-- no external calls, always runs first
+All three orchestrator caches share a single `RLock` because TTLCache is not thread-safe.
 
-### RequestInputAssistant (LLM, optional)
+The Google Sheets store caches raw worksheet values for 15 seconds per worksheet to avoid redundant API reads. The cache is invalidated immediately after every write.
 
-Two capabilities, both gated by `ai.enabled`:
+This in-memory design means state does not survive a process restart. That is acceptable: session state (drafts, pending actions) is short-lived, and durable data lives in Google Sheets.
 
-1. **`classify_intent`** — called when regex routing misses; asks the LLM to classify the operation (max 80 tokens). Routes management operations without requiring exact syntax.
-2. **`assist_request_text`** — called when pattern parsing fails; asks the LLM to extract structured request fields. Returns `AssistedParseResult` with validation errors and guidance.
+## Async I/O Pattern
 
-Uses OpenAI-compatible `/v1/chat/completions`. Any compatible provider works.
+The Telegram polling loop is fully async (python-telegram-bot v21+). All orchestrator calls that involve I/O (LLM requests, Sheets reads/writes) are dispatched via `asyncio.to_thread`, keeping the event loop free to handle other messages while waiting.
 
-### AgentOrchestrator
+The LLM client reuses a single `httpx.Client` instance across calls for TCP connection pooling.
 
-Intent routing order:
+## Why Google Sheets
 
-1. `/confirm` shortcut
-2. `FreeformIntentRouter` (regex)
-3. `parse_request_text` (regex)
-4. `classify_intent` (LLM, if enabled)
-5. `assist_request_text` (LLM, if enabled)
-6. `needs_input` fallback
-
-### RequestService
-
-- enforces FSM lifecycle transitions
-- adapters must not mutate `review_status` directly
-- every transition goes through a service method; invalid transitions raise `InvalidTransitionError`
-
-### AuditService
-
-- append-only audit events via `AuditEventType` enum
-- `list_timeline` returns events in sequence order
-
-### WorkflowStore
-
-The persistence interface. Required operations: `initialize`, `create_request`, `update_request`, `get_request`, `create_audit_event`, `list_audit_events`.
-
-### GoogleSheetsWorkflowStore
-
-- authenticates with Google service account (file or base64 JSON)
-- auto-creates worksheets on `initialize`
-- maps domain records to rows via `google_sheets_mapper`
-- keeps Google Sheets detail outside workflow services
-
-## Domain Enums
-
-| Enum | Values |
-| --- | --- |
-| `ReviewStatus` | `draft submitted in_review needs_info approved rejected cancelled` |
-| `AuditEventType` | `request_submitted approver_notified decision_recorded ...` |
-| `Operation` | `approve reject needinfo cancel lookup history resubmit my_pending pending_approvals confirm new_request unknown` |
-| `ResponseStatus` | `ok error submitted missing_fields confirmation_required needs_input` |
-
-All are `StrEnum` — values are plain strings, compatible with JSON serialization and string comparisons.
-
-## Persistence Decision
-
-### Chosen
-
-- Google Sheets
-
-### Why
-
+- simple to set up
 - no separate database deployment
-- easy shared access for a small internal team
+- enough for a small internal workflow
 
-### Tradeoffs
+Tradeoff:
 
-- limited write throughput — keep one replica to avoid write contention
-- weak fit for multi-replica concurrent writes
-- limited reporting vs. SQL
-
-Persistence is behind `WorkflowStore` so it can be swapped later.
-
-## Configuration Pattern
-
-- YAML for structured defaults (`runtime.yaml`)
-- env vars only for deploy-time overrides (`.agentbase/deploy.env`)
-- `pydantic-settings` reads env vars automatically with typed coercion — no manual override code
-
-## Upgrade Path
-
-If the workflow is proven useful:
-
-1. swap Google Sheets for a SQL backend via `WorkflowStore`
-2. add read-only inspection UI
-3. add group-chat support
-4. expand AI to diff analysis (see [AI Review Assistance](../future/ai-review-assistance.md))
+- not ideal for high write volume or multi-replica concurrency

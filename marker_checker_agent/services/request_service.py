@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
 from typing import Any
 from uuid import uuid4
 
 from marker_checker_agent.config import RuntimeConfig
 from marker_checker_agent.domain.enums import AuditEventType, ReviewStatus
-from marker_checker_agent.domain.models import RequestConversationRecord, RequestRecord
+from marker_checker_agent.domain.models import RequestConversationRecord, RequestRecord, RequestSummary
 from marker_checker_agent.persistence.base import WorkflowStore
 from marker_checker_agent.services.audit_service import AuditService
 from marker_checker_agent.time_utils import utc_now
@@ -338,12 +340,15 @@ class RequestService:
         return record
 
     def get_request(self, request_id: str) -> RequestRecord:
+        # Try exact match first, then uppercase-normalized (IDs are stored uppercase)
         record = self._workflow_store.get_request(request_id)
+        if record is None:
+            record = self._workflow_store.get_request(request_id.upper())
         if record is None:
             raise RequestNotFoundError(f"Request {request_id} was not found")
         return record
 
-    def get_request_summary(self, request_id: str) -> dict[str, Any]:
+    def get_request_summary(self, request_id: str) -> RequestSummary:
         record = self.get_request(request_id)
         return self._to_request_summary(record)
 
@@ -353,7 +358,7 @@ class RequestService:
         requester_handle: str | None = None,
         approver_handle: str | None = None,
         review_statuses: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RequestSummary]:
         records = self._workflow_store.list_requests()
         filtered: list[RequestRecord] = []
         for record in records:
@@ -368,7 +373,22 @@ class RequestService:
         filtered.sort(key=lambda record: record.updated_at, reverse=True)
         return [self._to_request_summary(record) for record in filtered]
 
-    def list_requester_pending_summaries(self, requester_handle: str) -> list[dict[str, Any]]:
+    def search_by_target_label(self, query: str) -> list[RequestSummary]:
+        q = query.strip().lower()
+        if not q:
+            return []
+        records = self._workflow_store.list_requests()
+        scored: list[tuple[float, RequestRecord]] = []
+        for record in records:
+            target_score = _target_match_score(q, record.target_label.lower())
+            id_score = _target_match_score(q, record.request_id.lower())
+            score = max(target_score, id_score)
+            if score > 0:
+                scored.append((score, record))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [self._to_request_summary(r) for _, r in scored]
+
+    def list_requester_pending_summaries(self, requester_handle: str) -> list[RequestSummary]:
         return self.list_request_summaries(
             requester_handle=requester_handle,
             review_statuses={
@@ -378,7 +398,7 @@ class RequestService:
             },
         )
 
-    def list_approver_pending_summaries(self, approver_handle: str) -> list[dict[str, Any]]:
+    def list_approver_pending_summaries(self, approver_handle: str) -> list[RequestSummary]:
         return self.list_request_summaries(
             approver_handle=approver_handle,
             review_statuses={
@@ -433,16 +453,64 @@ class RequestService:
         suffix = uuid4().hex[:8].upper()
         return f"{self._config.app.request_id_prefix}-{suffix}"
 
-    def _to_request_summary(self, record: RequestRecord) -> dict[str, Any]:
-        return {
-            "request_id": record.request_id,
-            "requester_handle": record.requester_handle,
-            "approver_handle": record.approver_handle,
-            "target_label": record.target_label,
-            "change_from_summary": record.change_from_summary,
-            "change_to_summary": record.change_to_summary,
-            "review_status": record.review_status,
-            "current_revision": record.current_revision,
-            "last_submitted_revision": record.last_submitted_revision,
-            "updated_at": record.updated_at.isoformat(),
-        }
+    def _to_request_summary(self, record: RequestRecord) -> RequestSummary:
+        return RequestSummary(
+            request_id=record.request_id,
+            requester_handle=record.requester_handle,
+            approver_handle=record.approver_handle,
+            target_label=record.target_label,
+            change_from_summary=record.change_from_summary,
+            change_to_summary=record.change_to_summary,
+            review_status=record.review_status,
+            current_revision=record.current_revision,
+            last_submitted_revision=record.last_submitted_revision,
+            updated_at=record.updated_at.isoformat(),
+        )
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.split(r"[-_\s]+", text)
+
+
+def _target_match_score(query: str, target: str) -> float:
+    """Return a match score in [0, 1]. 0 means no match."""
+    # 1. Exact substring — highest confidence
+    if query in target:
+        return 1.0
+
+    # 2. Normalized: treat -/_/space as the same character
+    norm_query = re.sub(r"[-_\s]+", "", query)
+    norm_target = re.sub(r"[-_\s]+", "", target)
+    if norm_query and norm_query in norm_target:
+        return 0.95
+
+    # 3. Token overlap: any query token fully matches any target token
+    q_tokens = _tokenize(query)
+    t_tokens = _tokenize(target)
+    if any(qt in t_tokens for qt in q_tokens if len(qt) >= 2):
+        return 0.85
+
+    # 4. Partial token prefix: any query token is a prefix of a target token (≥3 chars)
+    if any(
+        tt.startswith(qt)
+        for qt in q_tokens
+        for tt in t_tokens
+        if len(qt) >= 3
+    ):
+        return 0.7
+
+    # 5. Abbreviation / subsequence: all query chars appear in order in norm_target (≥3 chars)
+    if len(norm_query) >= 3 and _is_subsequence(norm_query, norm_target):
+        return 0.6
+
+    # 6. Fuzzy ratio via difflib — handles typos
+    ratio = SequenceMatcher(None, query, target).ratio()
+    if ratio >= 0.7:
+        return round(ratio * 0.65, 3)
+
+    return 0.0
+
+
+def _is_subsequence(query: str, target: str) -> bool:
+    it = iter(target)
+    return all(c in it for c in query)

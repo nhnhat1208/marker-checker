@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from marker_checker_agent.ai.assistant import AssistedParseResult, RequestInputAssistant
-from marker_checker_agent.ai.types import MANAGEMENT_OPERATIONS
+from cachetools import TTLCache
+
+LOGGER = logging.getLogger(__name__)
+
+from marker_checker_agent.ai.assistant import RequestInputAssistant
+from marker_checker_agent.ai.types import (
+    MANAGEMENT_OPERATIONS,
+    AssistedParseResult,
+    IntentManagement,
+    IntentNewRequest,
+    IntentUnknown,
+)
 from marker_checker_agent.domain.enums import AuditEventType, Operation, ResponseStatus
+from marker_checker_agent.domain.models import RequestSummary
 from marker_checker_agent.parsing.intent_router import FreeformIntentRouter, RoutedIntent
 from marker_checker_agent.parsing.request_parser import (
     ParsedRequest,
@@ -51,15 +63,34 @@ class AgentOrchestrator:
         self._request_service = request_service
         self._audit_service = audit_service
         self._input_assistant = input_assistant
-        self._pending_drafts: dict[str, PendingDraft] = {}
+        # TTLCache: maxsize caps memory, ttl prevents stale state after inactivity.
+        # All three share _draft_lock because TTLCache is not thread-safe.
+        self._pending_drafts: TTLCache[str, PendingDraft] = TTLCache(maxsize=256, ttl=3600)
+        self._pending_resubmit: TTLCache[str, str] = TTLCache(maxsize=256, ttl=86400)
+        self._partial_drafts: TTLCache[str, tuple[str, ParsedRequest]] = TTLCache(maxsize=256, ttl=300)
         self._draft_lock = threading.Lock()
         self._notify_approver: Callable[[dict[str, Any]], None] | None = None
+        self._notify_requester: Callable[[str, str], None] | None = None
         self._intent_router = FreeformIntentRouter()
 
     def set_approver_notification_callback(
         self, callback: Callable[[dict[str, Any]], None]
     ) -> None:
         self._notify_approver = callback
+
+    def set_requester_notification_callback(
+        self, callback: Callable[[str, str], None]
+    ) -> None:
+        self._notify_requester = callback
+
+    def discard_draft(self, requester_handle: str) -> dict[str, Any]:
+        with self._draft_lock:
+            draft = self._pending_drafts.pop(requester_handle, None)
+        self._pending_resubmit.pop(requester_handle, None)
+        self._partial_drafts.pop(requester_handle, None)
+        if draft is None:
+            return {"status": ResponseStatus.ERROR, "message": "No pending draft to discard."}
+        return {"status": ResponseStatus.OK, "message": "Pending draft discarded."}
 
     def handle_requester_message(
         self,
@@ -77,73 +108,157 @@ class AgentOrchestrator:
                 requester_handle=requester_handle,
             )
 
-        routed_intent = self._intent_router.route(normalized)
-        if routed_intent:
+        routed = self._intent_router.route(normalized)
+        if routed:
             return self._execute_routed_intent(
-                routed_intent,
+                routed,
                 actor_name=requester_name,
                 actor_handle=requester_handle,
                 source=source,
             )
 
+        # Fast-path: exact rigid pattern, no LLM required
         parsed = parse_request_text(normalized)
-        parser_name = "pattern"
-        assisted_result: AssistedParseResult | None = None
+        if parsed:
+            self._pending_resubmit.pop(requester_handle, None)
+            self._partial_drafts.pop(requester_handle, None)
+            return self._build_draft_response(
+                text=normalized,
+                parsed=parsed,
+                parser_name="pattern",
+                assisted_result=None,
+                requester_name=requester_name,
+                requester_handle=requester_handle,
+                source=source,
+            )
 
-        if not parsed and self._input_assistant:
-            classified = self._input_assistant.classify_intent(normalized)
-            if classified.operation in MANAGEMENT_OPERATIONS:
-                if classified.operation == Operation.CONFIRM:
-                    return self._confirm_pending_draft(
-                        requester_name=requester_name,
-                        requester_handle=requester_handle,
-                    )
-                routed = RoutedIntent(
-                    operation=classified.operation,
-                    request_id=classified.request_id,
-                    note=classified.note,
-                    text=classified.text,
-                )
-                return self._execute_routed_intent(
-                    routed,
-                    actor_name=requester_name,
-                    actor_handle=requester_handle,
-                    source=source,
-                )
-            assisted_result = self._input_assistant.assist_request_text(normalized)
-            parsed = assisted_result.parsed_request
-            parser_name = assisted_result.parser_name
+        # Contextual resubmit: user received NEEDINFO, their next free-text = resubmission
+        if requester_handle in self._pending_resubmit:
+            request_id = self._pending_resubmit.pop(requester_handle)
+            return self.handle_resubmission(
+                request_id=request_id,
+                text=normalized,
+                actor_name=requester_name,
+                actor_handle=requester_handle,
+                source=source,
+            )
 
+        if not self._input_assistant:
+            return {"status": ResponseStatus.NEEDS_INPUT, "message": _NEEDS_INPUT_MESSAGE}
+
+        return self._handle_with_ai(
+            text=normalized,
+            requester_name=requester_name,
+            requester_handle=requester_handle,
+            source=source,
+        )
+
+    def _handle_with_ai(
+        self,
+        *,
+        text: str,
+        requester_name: str | None,
+        requester_handle: str,
+        source: MessageSource,
+    ) -> dict[str, Any]:
+        # Short reply after MISSING_FIELDS: combine with original to fill in the missing field.
+        if requester_handle in self._partial_drafts and len(text) <= 80:
+            original_text, _ = self._partial_drafts.pop(requester_handle)
+            text = f"{original_text} {text}"
+        else:
+            self._partial_drafts.pop(requester_handle, None)
+
+        intent = self._input_assistant.classify_intent(text)
+
+        if isinstance(intent, IntentManagement):
+            if intent.operation == Operation.CONFIRM:
+                return self._confirm_pending_draft(
+                    requester_name=requester_name,
+                    requester_handle=requester_handle,
+                )
+            routed = RoutedIntent(
+                operation=intent.operation,
+                request_id=intent.request_id,
+                note=intent.note,
+                text=intent.text,
+                target_name=intent.target_name,
+            )
+            return self._execute_routed_intent(
+                routed,
+                actor_name=requester_name,
+                actor_handle=requester_handle,
+                source=source,
+            )
+
+        if isinstance(intent, IntentUnknown):
+            return {"status": ResponseStatus.NEEDS_INPUT, "message": _NEEDS_INPUT_MESSAGE}
+
+        # IntentNewRequest: use fields from classify if complete, else fall back to assist
+        parsed, assisted_result = self._resolve_new_request(text, intent)
+        return self._build_draft_response(
+            text=text,
+            parsed=parsed,
+            parser_name="llm_assisted",
+            assisted_result=assisted_result,
+            requester_name=requester_name,
+            requester_handle=requester_handle,
+            source=source,
+        )
+
+    def _resolve_new_request(
+        self,
+        text: str,
+        intent: IntentNewRequest,
+    ) -> tuple[ParsedRequest | None, AssistedParseResult | None]:
+        pre_parsed = ParsedRequest(
+            target_label=intent.target_label,
+            change_from_summary=intent.change_from_summary,
+            change_to_summary=intent.change_to_summary,
+            approver_handle=intent.approver_handle,
+        )
+        if not list_missing_required_fields(pre_parsed):
+            return pre_parsed, AssistedParseResult(
+                parsed_request=pre_parsed,
+                guidance_message=intent.guidance_message or None,
+                parser_name="llm_assisted",
+                missing_fields=[],
+                validation_errors=[],
+            )
+        assisted = self._input_assistant.assist_request_text(text)
+        return assisted.parsed_request, assisted
+
+    def _build_draft_response(
+        self,
+        *,
+        text: str,
+        parsed: ParsedRequest | None,
+        parser_name: str,
+        assisted_result: AssistedParseResult | None,
+        requester_name: str | None,
+        requester_handle: str,
+        source: MessageSource,
+    ) -> dict[str, Any]:
         if not parsed:
-            return {
-                "status": ResponseStatus.NEEDS_INPUT,
-                "message": (
-                    "Use a message like: "
-                    "'for target-name, change from old-value to new-value, "
-                    "ask @approver to approve'."
-                ),
-            }
+            return {"status": ResponseStatus.NEEDS_INPUT, "message": _NEEDS_INPUT_MESSAGE}
 
         missing_fields = list_missing_required_fields(parsed)
         if missing_fields:
-            clarification_message = (
+            clarification = (
                 self._input_assistant.generate_clarification_message(
-                    original_message=normalized,
+                    original_message=text,
                     missing_fields=missing_fields,
-                    validation_errors=assisted_result.validation_errors or [],
+                    validation_errors=assisted_result.validation_errors or [] if assisted_result else [],
                 )
                 if self._input_assistant
                 else None
             )
+            # Remember partial state so next short reply fills in the missing field.
+            self._partial_drafts[requester_handle] = (text, parsed)
             return {
                 "status": ResponseStatus.MISSING_FIELDS,
                 "message": (
-                    clarification_message
-                    or (
-                        assisted_result.guidance_message
-                        if assisted_result and assisted_result.guidance_message
-                        else None
-                    )
+                    clarification
+                    or (assisted_result.guidance_message if assisted_result else None)
                     or f"Missing fields: {', '.join(missing_fields)}"
                 ),
                 "missing_fields": missing_fields,
@@ -152,21 +267,22 @@ class AgentOrchestrator:
             }
 
         draft = PendingDraft(
-            request_text=normalized,
+            request_text=text,
             requester_name=requester_name,
             parsed_request=parsed,
             business_reason=None,
             source=source,
         )
         with self._draft_lock:
+            had_existing = requester_handle in self._pending_drafts
             self._pending_drafts[requester_handle] = draft
 
+        confirmation = self._format_draft_confirmation(draft.parsed_request, parser_name=parser_name)
+        if had_existing:
+            confirmation = "⚠️ Previous draft replaced.\n\n" + confirmation
         return {
             "status": ResponseStatus.CONFIRMATION_REQUIRED,
-            "message": self._format_draft_confirmation(
-                draft.parsed_request,
-                parser_name=parser_name,
-            ),
+            "message": confirmation,
             "draft": {
                 "requester_handle": requester_handle,
                 "approver_handle": draft.parsed_request.approver_handle,
@@ -216,6 +332,7 @@ class AgentOrchestrator:
                     source_channel=source.source_channel,
                     source_message_id=source.source_message_id,
                 )
+                self._pending_resubmit[record.requester_handle] = record.request_id
             elif action == Operation.CANCEL:
                 record = self._request_service.cancel_request(
                     request_id=request_id,
@@ -230,15 +347,28 @@ class AgentOrchestrator:
         except (InvalidTransitionError, RequestNotFoundError, ValueError) as exc:
             return {"status": ResponseStatus.ERROR, "message": str(exc)}
 
+        # Clear any pending-resubmit state — request is resolved, resubmit would fail.
+        if action in (Operation.APPROVE, Operation.REJECT, Operation.CANCEL):
+            self._pending_resubmit.pop(record.requester_handle, None)
+
         request_payload = self._request_service.get_request_summary(record.request_id)
-        return {
-            "status": ResponseStatus.OK,
-            "message": self._format_action_result_message(
+        result_message = self._format_action_result_message(
+            action=action,
+            request=request_payload,
+            actor_handle=actor_handle,
+            note=note,
+        )
+        if self._notify_requester and record.origin_channel_id:
+            requester_msg = _format_requester_notification(
                 action=action,
-                request=request_payload,
+                request_id=record.request_id,
                 actor_handle=actor_handle,
                 note=note,
-            ),
+            )
+            self._notify_requester(record.origin_channel_id, requester_msg)
+        return {
+            "status": ResponseStatus.OK,
+            "message": result_message,
             "request": request_payload,
         }
 
@@ -252,6 +382,19 @@ class AgentOrchestrator:
         source: MessageSource,
     ) -> dict[str, Any]:
         parsed = parse_request_text(text)
+
+        if not parsed and self._input_assistant:
+            result = self._input_assistant.assist_request_text(text)
+            if result.parsed_request:
+                missing = list_missing_required_fields(result.parsed_request)
+                if missing:
+                    return {
+                        "status": ResponseStatus.MISSING_FIELDS,
+                        "message": result.guidance_message or f"Missing fields: {', '.join(missing)}",
+                        "missing_fields": missing,
+                    }
+                parsed = result.parsed_request
+
         if not parsed:
             return {"status": ResponseStatus.ERROR, "message": "Could not parse resubmission message."}
 
@@ -313,6 +456,20 @@ class AgentOrchestrator:
             "status": ResponseStatus.OK,
             "timeline": history_payload,
             "summary_message": self._generate_request_history_summary(history_payload),
+        }
+
+    def search_by_target(self, target_name: str) -> dict[str, Any]:
+        if not target_name:
+            return {"status": ResponseStatus.ERROR, "message": "No target name provided."}
+        requests = self._request_service.search_by_target_label(target_name)
+        return {
+            "status": ResponseStatus.OK,
+            "message": _format_request_list(
+                requests,
+                empty_message=f"No requests found for target '{target_name}'.",
+                title=f"Requests for '{target_name}':",
+            ),
+            "requests": requests,
         }
 
     def list_requester_pending(self, requester_handle: str) -> dict[str, Any]:
@@ -424,6 +581,8 @@ class AgentOrchestrator:
             return self.list_requester_pending(actor_handle)
         if op == Operation.PENDING_APPROVALS:
             return self.list_pending_approvals(actor_handle)
+        if op == Operation.SEARCH:
+            return self.search_by_target(routed_intent.target_name)
 
         return {
             "status": ResponseStatus.ERROR,
@@ -455,18 +614,18 @@ class AgentOrchestrator:
             return f"LLM-assisted draft detected. Please verify the fields carefully.\n\n{message}"
         return message
 
-    def _generate_request_status_summary(self, request: dict[str, Any]) -> str | None:
+    def _generate_request_status_summary(self, request: RequestSummary) -> str | None:
         if not self._input_assistant:
             return None
         summary = (
-            f"request_id: {request.get('request_id', '')}\n"
-            f"status: {request.get('review_status', '')}\n"
-            f"target: {request.get('target_label', '')}\n"
-            f"from: {request.get('change_from_summary', '')}\n"
-            f"to: {request.get('change_to_summary', '')}\n"
-            f"requester: {request.get('requester_handle', '')}\n"
-            f"approver: {request.get('approver_handle', '')}\n"
-            f"revision: {request.get('last_submitted_revision', '')}"
+            f"request_id: {request['request_id']}\n"
+            f"status: {request['review_status']}\n"
+            f"target: {request['target_label']}\n"
+            f"from: {request['change_from_summary']}\n"
+            f"to: {request['change_to_summary']}\n"
+            f"requester: {request['requester_handle']}\n"
+            f"approver: {request['approver_handle']}\n"
+            f"revision: {request['last_submitted_revision']}"
         )
         return self._input_assistant.generate_status_summary(request_summary=summary)
 
@@ -492,22 +651,20 @@ class AgentOrchestrator:
         self,
         *,
         action: str,
-        request: dict[str, Any],
+        request: RequestSummary,
         actor_handle: str,
         note: str,
     ) -> str:
-        default_message = (
-            f"{request.get('request_id', '')} moved to {request.get('review_status', '')}."
-        )
+        default_message = f"{request['request_id']} moved to {request['review_status']}."
         if not self._input_assistant:
             return default_message
         action_result = (
             f"action: {action}\n"
-            f"request_id: {request.get('request_id', '')}\n"
-            f"status: {request.get('review_status', '')}\n"
-            f"target: {request.get('target_label', '')}\n"
-            f"from: {request.get('change_from_summary', '')}\n"
-            f"to: {request.get('change_to_summary', '')}\n"
+            f"request_id: {request['request_id']}\n"
+            f"status: {request['review_status']}\n"
+            f"target: {request['target_label']}\n"
+            f"from: {request['change_from_summary']}\n"
+            f"to: {request['change_to_summary']}\n"
             f"actor: {actor_handle}\n"
             f"note: {note}"
         )
@@ -520,6 +677,14 @@ class AgentOrchestrator:
 
 
 # --- module-level helpers (pure functions, no class state) ---
+
+_NEEDS_INPUT_MESSAGE = (
+    "Describe your change request in natural language, for example:\n"
+    "- 'enable feature-X on api-gateway, ask @john to approve'\n"
+    "- 'change timeout from 30s to 60s for nginx-config, @ops should review'\n"
+    "- 'tắt tính năng beta, nhờ @manager duyệt'"
+)
+
 
 def _assistant_metadata(result: AssistedParseResult | None) -> dict[str, Any] | None:
     if result is None:
@@ -550,3 +715,24 @@ def _format_request_list(
     if len(requests) > 5:
         lines.append(f"... and {len(requests) - 5} more.")
     return "\n".join(lines)
+
+
+def _format_requester_notification(
+    *,
+    action: str,
+    request_id: str,
+    actor_handle: str,
+    note: str,
+) -> str:
+    note_line = f"\nNote: {note}" if note else ""
+    if action == Operation.APPROVE:
+        return f"✅ {request_id} has been approved by {actor_handle}.{note_line}"
+    if action == Operation.REJECT:
+        return f"❌ {request_id} has been rejected by {actor_handle}.{note_line}"
+    if action == Operation.NEEDINFO:
+        return f"ℹ️ {actor_handle} needs more information on {request_id}.{note_line}\nJust reply with your updated message to resubmit."
+    if action == Operation.CANCEL:
+        return f"🚫 {request_id} was cancelled by {actor_handle}.{note_line}"
+    return f"{request_id} status updated by {actor_handle}.{note_line}"
+
+

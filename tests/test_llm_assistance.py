@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from marker_checker_agent.ai import AssistedParseResult, ClassifiedIntent
+from marker_checker_agent.ai import AssistedParseResult, IntentNewRequest
 from marker_checker_agent.domain.enums import Operation
 from marker_checker_agent.orchestrator import AgentOrchestrator
 from marker_checker_agent.parsing.request_parser import ParsedRequest
@@ -8,8 +8,8 @@ from tests.workflow_test_support import WorkflowTestCase
 
 
 class _NewRequestFakeBase:
-    def classify_intent(self, text: str) -> ClassifiedIntent:
-        return ClassifiedIntent(operation=Operation.NEW_REQUEST)
+    def classify_intent(self, text: str) -> IntentNewRequest:
+        return IntentNewRequest()  # empty fields → falls through to assist_request_text
 
 
 class LlmAssistanceTest(WorkflowTestCase):

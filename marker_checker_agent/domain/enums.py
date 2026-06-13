@@ -36,6 +36,7 @@ class Operation(StrEnum):
     MY_PENDING = "my_pending"
     PENDING_APPROVALS = "pending_approvals"
     CONFIRM = "confirm"
+    SEARCH = "search"
     # Intent classification sentinels
     NEW_REQUEST = "new_request"
     UNKNOWN = "unknown"

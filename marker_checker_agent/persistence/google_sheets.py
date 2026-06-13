@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 
+from cachetools import TTLCache
+
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
@@ -37,7 +39,11 @@ class GoogleSheetsWorkflowStore:
 
     def __init__(self, config: GoogleSheetsConfig) -> None:
         self._config = config
-        self._lock = threading.Lock()
+        # RLock: write methods hold the lock then call _iter_rows internally (reentrant).
+        self._lock = threading.RLock()
+        # Cache raw worksheet values for 15s; maxsize=3 (one per worksheet).
+        # Invalidated immediately after every write so reads post-write are always fresh.
+        self._sheet_cache: TTLCache[str, list[list[str]]] = TTLCache(maxsize=3, ttl=15)
         self._client = self._build_client()
         self._spreadsheet = self._open_spreadsheet()
 
@@ -66,6 +72,7 @@ class GoogleSheetsWorkflowStore:
         with self._lock:
             worksheet = self._requests_worksheet()
             worksheet.append_row(request_to_row(request), value_input_option="RAW")
+            self._sheet_cache.pop(worksheet.title, None)
         return request
 
     def update_request(self, request: RequestRecord) -> RequestRecord:
@@ -80,6 +87,7 @@ class GoogleSheetsWorkflowStore:
                 f"A{row_number}:{end_cell}",
                 [request_to_row(request)],
             )
+            self._sheet_cache.pop(worksheet.title, None)
         return request
 
     def get_request(self, request_id: str) -> RequestRecord | None:
@@ -106,6 +114,7 @@ class GoogleSheetsWorkflowStore:
                 conversation_to_row(conversation),
                 value_input_option="RAW",
             )
+            self._sheet_cache.pop(worksheet.title, None)
         return conversation
 
     def create_audit_event(self, event: AuditEventRecord) -> AuditEventRecord:
@@ -118,6 +127,7 @@ class GoogleSheetsWorkflowStore:
                 event.event_sequence = self._next_event_sequence_locked(event.request_id)
 
             worksheet.append_row(audit_to_row(event), value_input_option="RAW")
+            self._sheet_cache.pop(worksheet.title, None)
         return event
 
     def list_audit_events(self, request_id: str) -> list[AuditEventRecord]:
@@ -213,7 +223,11 @@ class GoogleSheetsWorkflowStore:
         return worksheet
 
     def _iter_rows(self, worksheet: gspread.Worksheet) -> list[dict[str, str]]:
-        values = worksheet.get_all_values()
+        with self._lock:
+            if worksheet.title not in self._sheet_cache:
+                self._sheet_cache[worksheet.title] = worksheet.get_all_values()
+            values = self._sheet_cache[worksheet.title]
+
         if not values:
             return []
 
