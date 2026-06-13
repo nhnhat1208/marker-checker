@@ -87,8 +87,11 @@ Build one Python service with:
 ## Required Runtime Configuration
 
 - `runtime.yaml` as the main runtime configuration
+- `runtime.example.yaml` as the template only
+- `.agentbase/deploy.env` as deploy-time override input
 - `TELEGRAM_BOT_TOKEN` as an optional secret override
 - `GOOGLE_SERVICE_ACCOUNT_FILE` or `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` as the credential source
+- `.env` is not part of the main runtime flow
 
 ## Delivery Sequence
 
@@ -133,6 +136,7 @@ Use:
 - one managed registry image
 - one `Custom Agent` runtime
 - one replica first
+- one deploy env file for runtime overrides
 
 ### Step 6: Verify After Deploy
 

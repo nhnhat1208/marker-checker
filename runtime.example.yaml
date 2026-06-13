@@ -27,3 +27,15 @@ google_sheets:
     requests: requests
     audit_events: audit_events
     request_conversations: request_conversations
+
+ai:
+  enabled: true
+  prompt_version: request-parse-v1
+  model: ""
+  base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
+  api_key: ""
+  timeout_seconds: 30.0
+  max_tokens: 250
+  temperature: 0.0
+  top_p: 0.95
+  presence_penalty: 0.0

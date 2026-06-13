@@ -7,6 +7,7 @@ from typing import Any
 from greennode_agentbase import PingStatus, RequestContext
 
 from marker_checker_agent.adapters.telegram_adapter import TelegramAdapter
+from marker_checker_agent.ai_input_assistance import build_input_assistant
 from marker_checker_agent.config import RuntimeConfig, load_runtime_config
 from marker_checker_agent.orchestrator import AgentOrchestrator, MessageSource
 from marker_checker_agent.persistence import build_workflow_store
@@ -30,9 +31,11 @@ class MarkerCheckerRuntime:
             workflow_store=self._workflow_store,
             audit_service=self._audit_service,
         )
+        self._input_assistant = build_input_assistant(self._config.ai)
         self._orchestrator = AgentOrchestrator(
             request_service=self._request_service,
             audit_service=self._audit_service,
+            input_assistant=self._input_assistant,
         )
         self._telegram_adapter = TelegramAdapter(
             config=self._config.telegram,
@@ -65,9 +68,15 @@ class MarkerCheckerRuntime:
                 source=source,
             )
 
-        if operation in {"approve", "reject", "needinfo", "cancel"}:
+        normalized_operation = {
+            "need_info": "needinfo",
+            "show_request": "lookup",
+            "my_approvals": "pending_approvals",
+        }.get(operation, operation)
+
+        if normalized_operation in {"approve", "reject", "needinfo", "cancel"}:
             return self._orchestrator.handle_approver_action(
-                action=operation,
+                action=normalized_operation,
                 request_id=payload.get("request_id", ""),
                 actor_name=actor_name,
                 actor_handle=actor_handle,
@@ -75,7 +84,7 @@ class MarkerCheckerRuntime:
                 source=source,
             )
 
-        if operation == "resubmit":
+        if normalized_operation == "resubmit":
             return self._orchestrator.handle_resubmission(
                 request_id=payload.get("request_id", ""),
                 text=payload.get("message", ""),
@@ -84,14 +93,20 @@ class MarkerCheckerRuntime:
                 source=source,
             )
 
-        if operation == "lookup":
+        if normalized_operation == "lookup":
             return self._orchestrator.lookup_request(
                 request_id=payload.get("request_id", ""),
                 actor_handle=actor_handle,
             )
 
-        if operation == "history":
+        if normalized_operation == "history":
             return self._orchestrator.get_history(payload.get("request_id", ""))
+
+        if normalized_operation == "my_pending":
+            return self._orchestrator.list_requester_pending(actor_handle)
+
+        if normalized_operation == "pending_approvals":
+            return self._orchestrator.list_pending_approvals(actor_handle)
 
         return {
             "status": "error",

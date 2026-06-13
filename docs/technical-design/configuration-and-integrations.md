@@ -7,12 +7,12 @@ Keep configuration small, explicit, and easy to move between local development a
 Use:
 
 - one YAML file as the primary configuration source
-- optional runtime environment variables only for deploy-specific overrides
+- optional environment variables only for deploy-specific overrides
 
 ## Recommended Files
 
-- `runtime.example.yaml`
-- local `runtime.yaml`
+- `runtime.yaml` for local working config
+- `runtime.example.yaml` as the template
 
 Later only:
 
@@ -57,9 +57,14 @@ Keep environment variables narrow. Use them only when deploy tooling should over
 
 Recommended optional variables for this release:
 
+- `TELEGRAM_ENABLED`
+- `TELEGRAM_POLLING_ENABLED`
 - `TELEGRAM_BOT_TOKEN`
+- `GOOGLE_SHEETS_ENABLED`
+- `GOOGLE_SHEETS_SPREADSHEET_ID`
 - `GOOGLE_SERVICE_ACCOUNT_FILE`
 - `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`
+- `GOOGLE_SHEETS_AUTO_CREATE_WORKSHEETS`
 
 ## Secret Handling
 
@@ -72,9 +77,11 @@ Keep these out of committed YAML:
 Recommended credential pattern:
 
 - local development may use `service_account_file` in `runtime.yaml`
-- deployed runtime may use `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` if the platform injects secrets as environment variables
+- deployed runtime may use `.agentbase/deploy.env` with `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`
 
 Non-secret values such as spreadsheet ID, request ID prefix, enabled flags, and worksheet names should stay in `runtime.yaml`.
+
+`.env` is not part of the main config flow for this project.
 
 ## Integration Pattern
 
@@ -114,5 +121,6 @@ Operational rules:
 - use one worksheet per logical record set
 - share the spreadsheet with the service-account email
 - keep one runtime replica first to avoid unnecessary write contention
+- allow auto-create worksheets for first setup, but keep worksheet names explicit in YAML
 
 For locked release decisions, see [Scope And Channel Decision](./scope-and-channel-decision.md).

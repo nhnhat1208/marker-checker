@@ -33,6 +33,7 @@ Deliver one working workflow where:
 - requester confirmation before submission
 - approver-handle validation
 - `runtime.yaml` as the primary configuration source
+- `.agentbase/deploy.env` for deploy overrides
 - Google Sheets persistence
 - approve, reject, needs-info, cancel
 - request lookup by request ID
@@ -174,6 +175,7 @@ Google Sheets:
 - [ ] Add adapter, orchestrator, services, and persistence packages
 - [ ] Add `runtime.example.yaml`
 - [ ] Add local `runtime.yaml`
+- [ ] Add `.agentbase/deploy.env` for deploy overrides
 - [ ] Confirm `runtime.yaml` is ignored by git
 
 ### Phase 3: Persistence
@@ -233,7 +235,7 @@ Google Sheets:
 - [ ] Confirm `.dockerignore`
 - [ ] Build image locally
 - [ ] Push image to AgentBase managed registry
-- [ ] Prepare runtime environment variables
+- [ ] Prepare deploy override variables
 - [ ] Deploy one `Custom Agent` runtime
 - [ ] Use one replica first
 - [ ] Confirm runtime becomes `ACTIVE`

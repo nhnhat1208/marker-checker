@@ -22,6 +22,9 @@ class WorkflowStore(Protocol):
     def get_request(self, request_id: str) -> RequestRecord | None:
         """Fetch one request by ID."""
 
+    def list_requests(self) -> list[RequestRecord]:
+        """Return all requests."""
+
     def create_request_conversation(
         self,
         conversation: RequestConversationRecord,

@@ -1,154 +1,221 @@
 # marker-checker
 
-AgentBase Custom Agent scaffold for a simple marker-checker approval workflow.
+AgentBase Custom Agent for a simple marker-checker approval workflow.
 
-## Purpose
+## What It Does
 
-This scaffold is built for one narrow, useful flow:
+- requester sends a change request
+- agent parses the message and asks for confirmation
+- approver approves, rejects, cancels, or asks for more info
+- request state and audit history are stored in Google Sheets
+- the same workflow is available from Telegram and `POST /invocations`
 
-- requester sends a change request in Telegram
-- approver reviews and resolves it
-- the system stores request state and audit history in Google Sheets
-- the runtime runs as one AgentBase Custom Agent
+## Read More
 
-This scaffold intentionally does not include:
-
-- AI review assistance
-- group-chat workflow
-- RBAC
-- AgentBase Memory
-- additional channels
-
-## Stack
-
-- `greennode-agentbase`
-- `python-telegram-bot`
-- `gspread`
-- `google-auth`
-- `PyYAML`
-- `pydantic`
-
-## Project Layout
-
-```text
-.
-├── docs/
-├── marker_checker_agent/
-│   ├── domain/
-│   ├── adapters/
-│   ├── request_parser.py
-│   ├── persistence/
-│   └── services/
-├── runtime.example.yaml
-├── main.py
-├── Dockerfile
-└── requirements.txt
-```
-
-Layout intent:
-
-- `domain/` keeps workflow records and enums
-- `request_parser.py` keeps request-intake parsing separate from orchestration
-- `services/` keeps approval workflow rules
-- `persistence/` keeps storage abstractions plus Google Sheets mapping and store logic
+- full doc map: [docs/README.md](/Users/lap15852/Documents/Projects/clawathon/marker-checker/docs/README.md)
+- product workflow: [docs/product-spec/workflow-and-lifecycle.md](/Users/lap15852/Documents/Projects/clawathon/marker-checker/docs/product-spec/workflow-and-lifecycle.md)
+- configuration details: [docs/technical-design/configuration-and-integrations.md](/Users/lap15852/Documents/Projects/clawathon/marker-checker/docs/technical-design/configuration-and-integrations.md)
+- architecture: [docs/technical-design/architecture.md](/Users/lap15852/Documents/Projects/clawathon/marker-checker/docs/technical-design/architecture.md)
+- delivery and rollout: [docs/delivery-plan/implementation-plan.md](/Users/lap15852/Documents/Projects/clawathon/marker-checker/docs/delivery-plan/implementation-plan.md)
 
 ## Configuration
 
-Primary configuration lives in `runtime.yaml`.
+- `runtime.yaml` is the primary local config
+- `runtime.example.yaml` is only a template
+- app loads `runtime.yaml` first, then falls back to `runtime.example.yaml`
+- deploy-time overrides go in `.agentbase/deploy.env`
 
-Start from the example file:
+Create local config:
 
 ```bash
 cp runtime.example.yaml runtime.yaml
 ```
 
-Main place to edit:
+Or:
 
-- `runtime.yaml` for application, workflow, Telegram, and Google Sheets settings
+```bash
+make setup-config
+```
 
-Typical local values to fill:
+Fill at least:
 
-- `google_sheets.spreadsheet_id` in `runtime.yaml`
-- one Google service-account credential source
-  - `GOOGLE_SERVICE_ACCOUNT_FILE` for local development
-  - or `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` for deployed runtime
-- `telegram.bot_token` in `runtime.yaml`, or `TELEGRAM_BOT_TOKEN` as a runtime override
+- `telegram.bot_token`
+- `google_sheets.spreadsheet_id`
+- one Google credential source
 
-## Google Sheets Setup
+Optional for LLM input assistance:
 
-1. Create one Google Sheet for the service.
-2. Enable `Google Sheets API` for the Google Cloud project used by the service account.
-3. Create or reuse a Google service account with Sheets API access.
-4. If you keep the current scopes, also enable `Google Drive API`.
-5. Share the spreadsheet with the service-account email as editor.
-6. Put the spreadsheet ID in `runtime.yaml` under `google_sheets.spreadsheet_id`.
-7. Provide credentials through either:
-   - `google_sheets.service_account_file` in `runtime.yaml`
-   - or `google_sheets.service_account_json_base64` in `runtime.yaml`
-   - or the matching environment variables if your deploy environment prefers runtime overrides
+- `ai.enabled`
+- `ai.prompt_version`
+- `ai.model`
+- `ai.base_url`
+- `ai.api_key`
+- `ai.max_tokens`
+- `ai.temperature`
+- `ai.top_p`
+- `ai.presence_penalty`
 
-The app auto-creates these worksheets when enabled:
+## Local Setup
+
+```bash
+make setup
+```
+
+### Google Sheets Setup
+
+1. Create a Google Sheet.
+2. Enable `Google Sheets API`.
+3. Enable `Google Drive API` if your current scopes still require it.
+4. Create or reuse a service account.
+5. Share the spreadsheet with the service-account email.
+6. Put the spreadsheet ID and credentials in `runtime.yaml`.
+
+Default worksheets:
 
 - `requests`
 - `audit_events`
 - `request_conversations`
 
-## Local Setup
-
-```bash
-.venv/bin/python -m pip install -r requirements.txt
-cp runtime.example.yaml runtime.yaml
-```
-
-If you do not have `.venv` yet:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp runtime.example.yaml runtime.yaml
-```
-
-Then update `runtime.yaml` with your real runtime values.
-
 ## Run Locally
 
 ```bash
-python main.py
+make run
 ```
 
-What should happen:
-
-- AgentBase health server starts on `0.0.0.0:8080`
-- Google Sheets worksheets are prepared if auto-create is enabled
-- Telegram polling starts if `telegram.enabled: true`, `telegram.polling_enabled: true`, and a bot token is present
-
-## Smoke Test
-
-Run the offline workflow smoke test:
+Disable Telegram polling if needed:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+make run-no-telegram
 ```
 
-This test does not call Telegram or Google Sheets. It verifies the local request lifecycle using an in-memory store.
+## Test Locally
 
-## Current Commands
+```bash
+make test
+```
 
-Telegram skeleton currently supports:
+Validate config:
+
+```bash
+make config-check
+```
+
+Check health:
+
+```bash
+make health
+```
+
+Send a sample request:
+
+```bash
+make invoke-sample
+```
+
+Main Telegram commands:
 
 - plain text request intake
 - `/confirm`
-- `/approve REQ-... note`
-- `/reject REQ-... reason`
-- `/needinfo REQ-... note`
-- `/cancel REQ-... note`
+- `/approve REQ-...`
+- `/reject REQ-...`
+- `/needinfo REQ-...`
+- `/cancel REQ-...`
 - `/status REQ-...`
 - `/history REQ-...`
 
+## Deploy Preparation
+
+- `.greennode.json` for AgentBase IAM
+- Docker
+- `.agentbase/deploy.env` for deploy-time overrides
+
+Expected `.greennode.json`:
+
+```json
+{
+  "client_id": "...",
+  "client_secret": "..."
+}
+```
+
+Recommended deploy env keys:
+
+```env
+TELEGRAM_ENABLED=true
+TELEGRAM_POLLING_ENABLED=false
+TELEGRAM_BOT_TOKEN=...
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SHEETS_SPREADSHEET_ID=...
+GOOGLE_SHEETS_AUTO_CREATE_WORKSHEETS=true
+GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=...
+AI_ENABLED=false
+AI_PROMPT_VERSION=request-parse-v1
+AI_MODEL=...
+AI_BASE_URL=https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1
+AI_API_KEY=...
+AI_TIMEOUT_SECONDS=30
+AI_MAX_TOKENS=250
+AI_TEMPERATURE=0.0
+AI_TOP_P=0.95
+AI_PRESENCE_PENALTY=0.0
+```
+
+- `runtime.yaml` local-only
+- `.greennode.json` local-only
+- `runtime.example.yaml` secret-free
+- local Docker build can use `make docker-build`
+
+## Deploy To AgentBase
+
+Use the AgentBase skills instead of running the helper scripts manually.
+
+Typical prompts:
+
+```text
+Use /agentbase-deploy to log in to AgentBase Container Registry for this project.
+```
+
+```text
+Use /agentbase-deploy to deploy this repo as a Custom Agent.
+Use `.agentbase/deploy.env` as the runtime env file.
+Use AgentBase managed Container Registry.
+Use linux/amd64.
+Use flavor `runtime-s2-general-2x4`.
+Use 1 min replica and 1 max replica.
+```
+
+For redeploy:
+
+```text
+Use /agentbase-deploy to redeploy the existing runtime for this repo with `.agentbase/deploy.env`.
+```
+
+For status and endpoint checks:
+
+```text
+Use /agentbase-monitor to check runtime status and logs for this project.
+```
+
+```text
+Use /agentbase-deploy to list endpoints for the current runtime.
+```
+
+Verify deployed runtime:
+
+```bash
+curl -s -i https://<endpoint-url>/health
+```
+
+Invoke:
+
+```bash
+curl -s -i -X POST https://<endpoint-url>/invocations \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"for sample-object, change from disabled to enabled, ask @checker to approve","actor_name":"Requester One","actor_handle":"@requester"}'
+```
+
 ## Notes
 
-- Persistence is intentionally behind a `WorkflowStore` abstraction.
-- `Google Sheets` is the first backend because it avoids deploying a separate database.
-- If request volume, concurrency, or reporting needs grow later, the storage backend can move to a SQL database without rewriting workflow rules.
-- The approver-notification callback is still a scaffold hook. Real Telegram routing to a specific approver chat needs a confirmed chat-ID strategy.
+- LLM input assistance is optional and only assists request parsing.
+- Workflow state stays rule-based even when AI is enabled.
+- The AI request body follows AgentBase's OpenAI-compatible `/v1/chat/completions` pattern with `model`, `messages`, `max_tokens`, `temperature`, `top_p`, and `presence_penalty`.

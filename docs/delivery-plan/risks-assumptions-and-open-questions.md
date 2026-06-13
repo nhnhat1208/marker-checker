@@ -81,6 +81,7 @@ Mitigation:
 - support both local file and base64 env secret modes
 - validate configuration on startup
 - document the spreadsheet-sharing requirement clearly
+- keep one clear config path: `runtime.yaml` locally and deploy env for remote overrides
 
 ### Risk: Weak Access Control
 

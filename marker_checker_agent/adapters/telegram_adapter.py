@@ -171,6 +171,11 @@ class TelegramAdapter:
             await update.effective_message.reply_text(message)
             return
 
+        summary_message = response.get("summary_message")
+        if summary_message:
+            await update.effective_message.reply_text(summary_message)
+            return
+
         if "request" in response:
             request = response["request"]
             await update.effective_message.reply_text(

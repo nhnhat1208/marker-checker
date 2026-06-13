@@ -72,8 +72,9 @@ Why:
 
 - load `runtime.yaml`
 - fall back to `runtime.example.yaml` when a local runtime file does not exist yet
-- apply optional runtime environment overrides when the deploy environment needs them
+- apply optional environment overrides when the deploy environment needs them
 - expose typed config to the runtime
+- keep `.env` outside the main config path
 
 ### TelegramAdapter
 
@@ -156,8 +157,9 @@ Use:
 
 Files:
 
+- `runtime.yaml`
 - `runtime.example.yaml`
-- local `runtime.yaml`
+- `.agentbase/deploy.env` for deploy-time overrides only
 
 Later only:
 
@@ -173,6 +175,7 @@ Rules:
 - every transition goes through a service method
 - invalid transitions fail safely
 - terminal decisions are auditable
+- state-changing actions should prefer explicit request ID
 
 ## Minimum Persistent Records
 

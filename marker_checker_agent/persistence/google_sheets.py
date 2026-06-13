@@ -89,6 +89,10 @@ class GoogleSheetsWorkflowStore:
                 return request_from_row(row)
         return None
 
+    def list_requests(self) -> list[RequestRecord]:
+        worksheet = self._requests_worksheet()
+        return [request_from_row(row) for row in self._iter_rows(worksheet)]
+
     def create_request_conversation(
         self,
         conversation: RequestConversationRecord,

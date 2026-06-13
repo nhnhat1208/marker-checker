@@ -345,18 +345,47 @@ class RequestService:
 
     def get_request_summary(self, request_id: str) -> dict[str, Any]:
         record = self.get_request(request_id)
-        return {
-            "request_id": record.request_id,
-            "requester_handle": record.requester_handle,
-            "approver_handle": record.approver_handle,
-            "target_label": record.target_label,
-            "change_from_summary": record.change_from_summary,
-            "change_to_summary": record.change_to_summary,
-            "review_status": record.review_status,
-            "current_revision": record.current_revision,
-            "last_submitted_revision": record.last_submitted_revision,
-            "updated_at": record.updated_at.isoformat(),
-        }
+        return self._to_request_summary(record)
+
+    def list_request_summaries(
+        self,
+        *,
+        requester_handle: str | None = None,
+        approver_handle: str | None = None,
+        review_statuses: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        records = self._workflow_store.list_requests()
+        filtered: list[RequestRecord] = []
+        for record in records:
+            if requester_handle and record.requester_handle != requester_handle:
+                continue
+            if approver_handle and record.approver_handle != approver_handle:
+                continue
+            if review_statuses and record.review_status not in review_statuses:
+                continue
+            filtered.append(record)
+
+        filtered.sort(key=lambda record: record.updated_at, reverse=True)
+        return [self._to_request_summary(record) for record in filtered]
+
+    def list_requester_pending_summaries(self, requester_handle: str) -> list[dict[str, Any]]:
+        return self.list_request_summaries(
+            requester_handle=requester_handle,
+            review_statuses={
+                ReviewStatus.SUBMITTED.value,
+                ReviewStatus.NEEDS_INFO.value,
+                ReviewStatus.IN_REVIEW.value,
+            },
+        )
+
+    def list_approver_pending_summaries(self, approver_handle: str) -> list[dict[str, Any]]:
+        return self.list_request_summaries(
+            approver_handle=approver_handle,
+            review_statuses={
+                ReviewStatus.SUBMITTED.value,
+                ReviewStatus.IN_REVIEW.value,
+            },
+        )
 
     def _change_status(
         self,
@@ -403,3 +432,17 @@ class RequestService:
     def _generate_request_id(self) -> str:
         suffix = uuid4().hex[:8].upper()
         return f"{self._config.app.request_id_prefix}-{suffix}"
+
+    def _to_request_summary(self, record: RequestRecord) -> dict[str, Any]:
+        return {
+            "request_id": record.request_id,
+            "requester_handle": record.requester_handle,
+            "approver_handle": record.approver_handle,
+            "target_label": record.target_label,
+            "change_from_summary": record.change_from_summary,
+            "change_to_summary": record.change_to_summary,
+            "review_status": record.review_status,
+            "current_revision": record.current_revision,
+            "last_submitted_revision": record.last_submitted_revision,
+            "updated_at": record.updated_at.isoformat(),
+        }
