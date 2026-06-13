@@ -5,13 +5,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from marker_checker_agent.ai_input_assistance import (
-    AssistedParseResult,
-    RequestInputAssistant,
-)
-from marker_checker_agent.domain.enums import AuditEventType
-from marker_checker_agent.intent_router import FreeformIntentRouter, RoutedIntent
-from marker_checker_agent.request_parser import (
+from marker_checker_agent.ai.assistant import AssistedParseResult, RequestInputAssistant
+from marker_checker_agent.ai.types import MANAGEMENT_OPERATIONS
+from marker_checker_agent.domain.enums import AuditEventType, Operation, ResponseStatus
+from marker_checker_agent.parsing.intent_router import FreeformIntentRouter, RoutedIntent
+from marker_checker_agent.parsing.request_parser import (
     ParsedRequest,
     format_confirmation_message,
     list_missing_required_fields,
@@ -91,14 +89,34 @@ class AgentOrchestrator:
         parsed = parse_request_text(normalized)
         parser_name = "pattern"
         assisted_result: AssistedParseResult | None = None
+
         if not parsed and self._input_assistant:
+            classified = self._input_assistant.classify_intent(normalized)
+            if classified.operation in MANAGEMENT_OPERATIONS:
+                if classified.operation == Operation.CONFIRM:
+                    return self._confirm_pending_draft(
+                        requester_name=requester_name,
+                        requester_handle=requester_handle,
+                    )
+                routed = RoutedIntent(
+                    operation=classified.operation,
+                    request_id=classified.request_id,
+                    note=classified.note,
+                    text=classified.text,
+                )
+                return self._execute_routed_intent(
+                    routed,
+                    actor_name=requester_name,
+                    actor_handle=requester_handle,
+                    source=source,
+                )
             assisted_result = self._input_assistant.assist_request_text(normalized)
             parsed = assisted_result.parsed_request
             parser_name = assisted_result.parser_name
 
         if not parsed:
             return {
-                "status": "needs_input",
+                "status": ResponseStatus.NEEDS_INPUT,
                 "message": (
                     "Use a message like: "
                     "'for target-name, change from old-value to new-value, "
@@ -118,7 +136,7 @@ class AgentOrchestrator:
                 else None
             )
             return {
-                "status": "missing_fields",
+                "status": ResponseStatus.MISSING_FIELDS,
                 "message": (
                     clarification_message
                     or (
@@ -126,22 +144,11 @@ class AgentOrchestrator:
                         if assisted_result and assisted_result.guidance_message
                         else None
                     )
-                    or (
-                        f"Missing fields: {', '.join(missing_fields)}"
-                    )
+                    or f"Missing fields: {', '.join(missing_fields)}"
                 ),
                 "missing_fields": missing_fields,
                 "parser": parser_name,
-                "parser_metadata": (
-                    {
-                        "model": assisted_result.model,
-                        "prompt_version": assisted_result.prompt_version,
-                        "latency_ms": assisted_result.latency_ms,
-                        "validation_errors": assisted_result.validation_errors or [],
-                    }
-                    if assisted_result
-                    else None
-                ),
+                "parser_metadata": _assistant_metadata(assisted_result),
             }
 
         draft = PendingDraft(
@@ -155,7 +162,7 @@ class AgentOrchestrator:
             self._pending_drafts[requester_handle] = draft
 
         return {
-            "status": "confirmation_required",
+            "status": ResponseStatus.CONFIRMATION_REQUIRED,
             "message": self._format_draft_confirmation(
                 draft.parsed_request,
                 parser_name=parser_name,
@@ -167,16 +174,7 @@ class AgentOrchestrator:
                 "change_from_summary": draft.parsed_request.change_from_summary,
                 "change_to_summary": draft.parsed_request.change_to_summary,
                 "parser": parser_name,
-                "parser_metadata": (
-                    {
-                        "model": assisted_result.model,
-                        "prompt_version": assisted_result.prompt_version,
-                        "latency_ms": assisted_result.latency_ms,
-                        "validation_errors": assisted_result.validation_errors or [],
-                    }
-                    if assisted_result
-                    else None
-                ),
+                "parser_metadata": _assistant_metadata(assisted_result),
             },
         }
 
@@ -191,7 +189,7 @@ class AgentOrchestrator:
         source: MessageSource,
     ) -> dict[str, Any]:
         try:
-            if action == "approve":
+            if action == Operation.APPROVE:
                 record = self._request_service.approve_request(
                     request_id=request_id,
                     actor_name=actor_name,
@@ -200,7 +198,7 @@ class AgentOrchestrator:
                     source_channel=source.source_channel,
                     source_message_id=source.source_message_id,
                 )
-            elif action == "reject":
+            elif action == Operation.REJECT:
                 record = self._request_service.reject_request(
                     request_id=request_id,
                     actor_name=actor_name,
@@ -209,7 +207,7 @@ class AgentOrchestrator:
                     source_channel=source.source_channel,
                     source_message_id=source.source_message_id,
                 )
-            elif action == "needinfo":
+            elif action == Operation.NEEDINFO:
                 record = self._request_service.request_more_info(
                     request_id=request_id,
                     actor_name=actor_name,
@@ -218,7 +216,7 @@ class AgentOrchestrator:
                     source_channel=source.source_channel,
                     source_message_id=source.source_message_id,
                 )
-            elif action == "cancel":
+            elif action == Operation.CANCEL:
                 record = self._request_service.cancel_request(
                     request_id=request_id,
                     actor_name=actor_name,
@@ -228,13 +226,13 @@ class AgentOrchestrator:
                     source_message_id=source.source_message_id,
                 )
             else:
-                return {"status": "error", "message": f"Unsupported action: {action}"}
+                return {"status": ResponseStatus.ERROR, "message": f"Unsupported action: {action}"}
         except (InvalidTransitionError, RequestNotFoundError, ValueError) as exc:
-            return {"status": "error", "message": str(exc)}
+            return {"status": ResponseStatus.ERROR, "message": str(exc)}
 
         request_payload = self._request_service.get_request_summary(record.request_id)
         return {
-            "status": "ok",
+            "status": ResponseStatus.OK,
             "message": self._format_action_result_message(
                 action=action,
                 request=request_payload,
@@ -255,7 +253,7 @@ class AgentOrchestrator:
     ) -> dict[str, Any]:
         parsed = parse_request_text(text)
         if not parsed:
-            return {"status": "error", "message": "Could not parse resubmission message."}
+            return {"status": ResponseStatus.ERROR, "message": "Could not parse resubmission message."}
 
         try:
             record = self._request_service.resubmit_request(
@@ -271,10 +269,10 @@ class AgentOrchestrator:
                 source_message_id=source.source_message_id,
             )
         except (InvalidTransitionError, RequestNotFoundError) as exc:
-            return {"status": "error", "message": str(exc)}
+            return {"status": ResponseStatus.ERROR, "message": str(exc)}
 
         return {
-            "status": "ok",
+            "status": ResponseStatus.OK,
             "message": f"{record.request_id} resubmitted as revision {record.last_submitted_revision}.",
             "request": self._request_service.get_request_summary(record.request_id),
         }
@@ -283,7 +281,7 @@ class AgentOrchestrator:
         try:
             request = self._request_service.get_request_summary(request_id)
         except RequestNotFoundError as exc:
-            return {"status": "error", "message": str(exc)}
+            return {"status": ResponseStatus.ERROR, "message": str(exc)}
 
         self._audit_service.record_event(
             request_id=request_id,
@@ -294,7 +292,7 @@ class AgentOrchestrator:
             event_payload={"request_id": request_id},
         )
         return {
-            "status": "ok",
+            "status": ResponseStatus.OK,
             "request": request,
             "summary_message": self._generate_request_status_summary(request),
         }
@@ -312,10 +310,36 @@ class AgentOrchestrator:
             for event in timeline
         ]
         return {
-            "status": "ok",
+            "status": ResponseStatus.OK,
             "timeline": history_payload,
             "summary_message": self._generate_request_history_summary(history_payload),
         }
+
+    def list_requester_pending(self, requester_handle: str) -> dict[str, Any]:
+        requests = self._request_service.list_requester_pending_summaries(requester_handle)
+        return {
+            "status": ResponseStatus.OK,
+            "message": _format_request_list(
+                requests,
+                empty_message="You have no active requests.",
+                title="Your active requests:",
+            ),
+            "requests": requests,
+        }
+
+    def list_pending_approvals(self, approver_handle: str) -> dict[str, Any]:
+        requests = self._request_service.list_approver_pending_summaries(approver_handle)
+        return {
+            "status": ResponseStatus.OK,
+            "message": _format_request_list(
+                requests,
+                empty_message="You have no requests waiting for approval.",
+                title="Requests waiting for your approval:",
+            ),
+            "requests": requests,
+        }
+
+    # --- private helpers ---
 
     def _confirm_pending_draft(
         self,
@@ -328,7 +352,7 @@ class AgentOrchestrator:
 
         if draft is None:
             return {
-                "status": "error",
+                "status": ResponseStatus.ERROR,
                 "message": "No pending draft found. Send a request message first.",
             }
 
@@ -353,12 +377,57 @@ class AgentOrchestrator:
             self._notify_approver(payload)
 
         return {
-            "status": "submitted",
+            "status": ResponseStatus.SUBMITTED,
             "message": (
                 f"Request {record.request_id} submitted to "
                 f"{draft.parsed_request.approver_handle}."
             ),
             "request": payload,
+        }
+
+    def _execute_routed_intent(
+        self,
+        routed_intent: RoutedIntent,
+        *,
+        actor_name: str | None,
+        actor_handle: str,
+        source: MessageSource,
+    ) -> dict[str, Any]:
+        op = routed_intent.operation
+
+        if op in {Operation.CANCEL, Operation.NEEDINFO}:
+            return self.handle_approver_action(
+                action=op,
+                request_id=routed_intent.request_id,
+                actor_name=actor_name,
+                actor_handle=actor_handle,
+                note=routed_intent.note,
+                source=source,
+            )
+
+        if op == Operation.LOOKUP:
+            return self.lookup_request(
+                request_id=routed_intent.request_id,
+                actor_handle=actor_handle,
+            )
+        if op == Operation.HISTORY:
+            return self.get_history(routed_intent.request_id)
+        if op == Operation.RESUBMIT:
+            return self.handle_resubmission(
+                request_id=routed_intent.request_id,
+                text=routed_intent.text,
+                actor_name=actor_name,
+                actor_handle=actor_handle,
+                source=source,
+            )
+        if op == Operation.MY_PENDING:
+            return self.list_requester_pending(actor_handle)
+        if op == Operation.PENDING_APPROVALS:
+            return self.list_pending_approvals(actor_handle)
+
+        return {
+            "status": ResponseStatus.ERROR,
+            "message": f"Unsupported routed operation: {op}",
         }
 
     def _format_draft_confirmation(
@@ -385,80 +454,6 @@ class AgentOrchestrator:
         if parser_name == "llm_assisted":
             return f"LLM-assisted draft detected. Please verify the fields carefully.\n\n{message}"
         return message
-
-    def _execute_routed_intent(
-        self,
-        routed_intent: RoutedIntent,
-        *,
-        actor_name: str | None,
-        actor_handle: str,
-        source: MessageSource,
-    ) -> dict[str, Any]:
-        if routed_intent.operation == "lookup":
-            return self.lookup_request(
-                request_id=routed_intent.request_id,
-                actor_handle=actor_handle,
-            )
-        if routed_intent.operation == "history":
-            return self.get_history(routed_intent.request_id)
-        if routed_intent.operation == "cancel":
-            return self.handle_approver_action(
-                action="cancel",
-                request_id=routed_intent.request_id,
-                actor_name=actor_name,
-                actor_handle=actor_handle,
-                note=routed_intent.note,
-                source=source,
-            )
-        if routed_intent.operation == "needinfo":
-            return self.handle_approver_action(
-                action="needinfo",
-                request_id=routed_intent.request_id,
-                actor_name=actor_name,
-                actor_handle=actor_handle,
-                note=routed_intent.note,
-                source=source,
-            )
-        if routed_intent.operation == "resubmit":
-            return self.handle_resubmission(
-                request_id=routed_intent.request_id,
-                text=routed_intent.text,
-                actor_name=actor_name,
-                actor_handle=actor_handle,
-                source=source,
-            )
-        if routed_intent.operation == "my_pending":
-            return self.list_requester_pending(actor_handle)
-        if routed_intent.operation == "pending_approvals":
-            return self.list_pending_approvals(actor_handle)
-        return {
-            "status": "error",
-            "message": f"Unsupported routed operation: {routed_intent.operation}",
-        }
-
-    def list_requester_pending(self, requester_handle: str) -> dict[str, Any]:
-        requests = self._request_service.list_requester_pending_summaries(requester_handle)
-        return {
-            "status": "ok",
-            "message": self._format_request_list_message(
-                requests,
-                empty_message="You have no active requests.",
-                title="Your active requests:",
-            ),
-            "requests": requests,
-        }
-
-    def list_pending_approvals(self, approver_handle: str) -> dict[str, Any]:
-        requests = self._request_service.list_approver_pending_summaries(approver_handle)
-        return {
-            "status": "ok",
-            "message": self._format_request_list_message(
-                requests,
-                empty_message="You have no requests waiting for approval.",
-                title="Requests waiting for your approval:",
-            ),
-            "requests": requests,
-        }
 
     def _generate_request_status_summary(self, request: dict[str, Any]) -> str | None:
         if not self._input_assistant:
@@ -523,24 +518,35 @@ class AgentOrchestrator:
             or default_message
         )
 
-    def _format_request_list_message(
-        self,
-        requests: list[dict[str, Any]],
-        *,
-        empty_message: str,
-        title: str,
-    ) -> str:
-        if not requests:
-            return empty_message
-        lines = [title]
-        for request in requests[:5]:
-            lines.append(
-                (
-                    f"- {request.get('request_id')} | {request.get('review_status')} | "
-                    f"{request.get('target_label')} | "
-                    f"{request.get('change_from_summary')} -> {request.get('change_to_summary')}"
-                )
-            )
-        if len(requests) > 5:
-            lines.append(f"... and {len(requests) - 5} more.")
-        return "\n".join(lines)
+
+# --- module-level helpers (pure functions, no class state) ---
+
+def _assistant_metadata(result: AssistedParseResult | None) -> dict[str, Any] | None:
+    if result is None:
+        return None
+    return {
+        "model": result.model,
+        "prompt_version": result.prompt_version,
+        "latency_ms": result.latency_ms,
+        "validation_errors": result.validation_errors or [],
+    }
+
+
+def _format_request_list(
+    requests: list[dict[str, Any]],
+    *,
+    empty_message: str,
+    title: str,
+) -> str:
+    if not requests:
+        return empty_message
+    lines = [title]
+    for req in requests[:5]:
+        lines.append(
+            f"- {req.get('request_id')} | {req.get('review_status')} | "
+            f"{req.get('target_label')} | "
+            f"{req.get('change_from_summary')} -> {req.get('change_to_summary')}"
+        )
+    if len(requests) > 5:
+        lines.append(f"... and {len(requests) - 5} more.")
+    return "\n".join(lines)

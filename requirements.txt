@@ -1,6 +1,0 @@
-gspread>=6.1.2,<7.0.0
-google-auth>=2.35.0,<3.0.0
-greennode-agentbase
-pydantic>=2.8.2,<3.0.0
-PyYAML>=6.0.2,<7.0.0
-python-telegram-bot>=21.4,<22.0

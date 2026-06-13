@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
-from marker_checker_agent.ai_prompts import REQUEST_PARSE_PROMPT_VERSION
+from pydantic import AliasChoices, BaseModel, Field
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 class AppConfig(BaseModel):
@@ -24,7 +23,24 @@ class WorkflowConfig(BaseModel):
     exact_lookup_only: bool = True
 
 
-class TelegramConfig(BaseModel):
+class _EnvFirstSettings(BaseSettings):
+    """BaseSettings where env vars take priority over constructor kwargs (YAML values)."""
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return env_settings, init_settings, file_secret_settings
+
+
+class TelegramConfig(_EnvFirstSettings):
+    model_config = SettingsConfigDict(env_prefix="TELEGRAM_")
+
     enabled: bool = True
     polling_enabled: bool = True
     bot_token: str = ""
@@ -37,20 +53,34 @@ class GoogleSheetsWorksheetConfig(BaseModel):
     request_conversations: str = "request_conversations"
 
 
-class GoogleSheetsConfig(BaseModel):
+class GoogleSheetsConfig(_EnvFirstSettings):
+    model_config = SettingsConfigDict(env_prefix="GOOGLE_SHEETS_", populate_by_name=True)
+
     enabled: bool = True
     spreadsheet_id: str = ""
-    service_account_file: str = ""
-    service_account_json_base64: str = ""
-    auto_create_worksheets: bool = True
-    worksheets: GoogleSheetsWorksheetConfig = Field(
-        default_factory=GoogleSheetsWorksheetConfig
+    service_account_file: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GOOGLE_SERVICE_ACCOUNT_FILE",
+            "GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE",
+        ),
     )
+    service_account_json_base64: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+            "GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON_BASE64",
+        ),
+    )
+    auto_create_worksheets: bool = True
+    worksheets: GoogleSheetsWorksheetConfig = Field(default_factory=GoogleSheetsWorksheetConfig)
 
 
-class AIConfig(BaseModel):
+class AIConfig(_EnvFirstSettings):
+    model_config = SettingsConfigDict(env_prefix="AI_")
+
     enabled: bool = False
-    prompt_version: str = REQUEST_PARSE_PROMPT_VERSION
+    prompt_version: str = "request-parse-v1"
     model: str = ""
     base_url: str = "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
     api_key: str = ""
@@ -72,115 +102,11 @@ class RuntimeConfig(BaseModel):
 def _load_yaml_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-
     with path.open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
         if not isinstance(data, dict):
             return {}
         return data
-
-
-def _apply_environment_overrides(config: RuntimeConfig) -> RuntimeConfig:
-    def string_override(env_name: str, current_value: str) -> str:
-        raw_value = os.getenv(env_name)
-        if raw_value is None:
-            return current_value
-        return raw_value.strip()
-
-    def int_override(env_name: str, current_value: int) -> int:
-        raw_value = os.getenv(env_name)
-        if raw_value is None:
-            return current_value
-        try:
-            return int(raw_value.strip())
-        except ValueError:
-            return current_value
-
-    def float_override(env_name: str, current_value: float) -> float:
-        raw_value = os.getenv(env_name)
-        if raw_value is None:
-            return current_value
-        try:
-            return float(raw_value.strip())
-        except ValueError:
-            return current_value
-
-    def bool_override(env_name: str, current_value: bool) -> bool:
-        raw_value = os.getenv(env_name)
-        if raw_value is None:
-            return current_value
-
-        normalized = raw_value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-        return current_value
-
-    telegram_overrides = {
-        "enabled": bool_override("TELEGRAM_ENABLED", config.telegram.enabled),
-        "polling_enabled": bool_override(
-            "TELEGRAM_POLLING_ENABLED",
-            config.telegram.polling_enabled,
-        ),
-        "bot_token": string_override("TELEGRAM_BOT_TOKEN", config.telegram.bot_token),
-    }
-
-    google_sheets_overrides: dict[str, Any] = {
-        "enabled": bool_override(
-            "GOOGLE_SHEETS_ENABLED",
-            config.google_sheets.enabled,
-        ),
-        "spreadsheet_id": string_override(
-            "GOOGLE_SHEETS_SPREADSHEET_ID",
-            config.google_sheets.spreadsheet_id,
-        ),
-        "service_account_file": string_override(
-            "GOOGLE_SERVICE_ACCOUNT_FILE",
-            config.google_sheets.service_account_file,
-        ),
-        "service_account_json_base64": string_override(
-            "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
-            config.google_sheets.service_account_json_base64,
-        ),
-        "auto_create_worksheets": bool_override(
-            "GOOGLE_SHEETS_AUTO_CREATE_WORKSHEETS",
-            config.google_sheets.auto_create_worksheets,
-        ),
-    }
-
-    ai_overrides: dict[str, Any] = {
-        "enabled": bool_override("AI_ENABLED", config.ai.enabled),
-        "prompt_version": string_override(
-            "AI_PROMPT_VERSION",
-            config.ai.prompt_version,
-        ),
-        "model": string_override("AI_MODEL", config.ai.model),
-        "base_url": string_override("AI_BASE_URL", config.ai.base_url),
-        "api_key": string_override("AI_API_KEY", config.ai.api_key),
-        "timeout_seconds": float_override(
-            "AI_TIMEOUT_SECONDS",
-            config.ai.timeout_seconds,
-        ),
-        "max_tokens": int_override("AI_MAX_TOKENS", config.ai.max_tokens),
-        "temperature": float_override("AI_TEMPERATURE", config.ai.temperature),
-        "top_p": float_override("AI_TOP_P", config.ai.top_p),
-        "presence_penalty": float_override(
-            "AI_PRESENCE_PENALTY",
-            config.ai.presence_penalty,
-        ),
-    }
-
-    return RuntimeConfig(
-        app=config.app.model_dump(),
-        workflow=config.workflow.model_dump(),
-        telegram={**config.telegram.model_dump(), **telegram_overrides},
-        google_sheets={
-            **config.google_sheets.model_dump(),
-            **google_sheets_overrides,
-        },
-        ai={**config.ai.model_dump(), **ai_overrides},
-    )
 
 
 def _validate_runtime_config(config: RuntimeConfig) -> RuntimeConfig:
@@ -237,8 +163,13 @@ def load_runtime_config(base_dir: Path | None = None) -> RuntimeConfig:
             "runtime.example.yaml as the packaged baseline config."
         )
 
-    runtime_config = _load_yaml_file(runtime_path)
+    yaml_data = _load_yaml_file(runtime_path)
 
-    config = RuntimeConfig(**runtime_config)
-    config = _apply_environment_overrides(config)
+    config = RuntimeConfig(
+        app=AppConfig(**(yaml_data.get("app") or {})),
+        workflow=WorkflowConfig(**(yaml_data.get("workflow") or {})),
+        telegram=TelegramConfig(**(yaml_data.get("telegram") or {})),
+        google_sheets=GoogleSheetsConfig(**(yaml_data.get("google_sheets") or {})),
+        ai=AIConfig(**(yaml_data.get("ai") or {})),
+    )
     return _validate_runtime_config(config)

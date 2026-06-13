@@ -3,10 +3,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from marker_checker_agent.domain.enums import Operation
+
 
 @dataclass(frozen=True)
 class RoutedIntent:
-    operation: str
+    operation: Operation
     request_id: str
     note: str = ""
     text: str = ""
@@ -47,21 +49,21 @@ class FreeformIntentRouter:
         lookup_match = self._LOOKUP_PATTERN.match(text)
         if lookup_match:
             return RoutedIntent(
-                operation="lookup",
+                operation=Operation.LOOKUP,
                 request_id=lookup_match.group("request_id"),
             )
 
         history_match = self._HISTORY_PATTERN.match(text)
         if history_match:
             return RoutedIntent(
-                operation="history",
+                operation=Operation.HISTORY,
                 request_id=history_match.group("request_id"),
             )
 
         cancel_match = self._CANCEL_PATTERN.match(text)
         if cancel_match:
             return RoutedIntent(
-                operation="cancel",
+                operation=Operation.CANCEL,
                 request_id=cancel_match.group("request_id"),
                 note=(cancel_match.group("note") or "").strip(),
             )
@@ -69,7 +71,7 @@ class FreeformIntentRouter:
         needinfo_match = self._NEEDINFO_PATTERN.match(text)
         if needinfo_match:
             return RoutedIntent(
-                operation="needinfo",
+                operation=Operation.NEEDINFO,
                 request_id=needinfo_match.group("request_id"),
                 note=(needinfo_match.group("note") or "").strip(),
             )
@@ -77,15 +79,15 @@ class FreeformIntentRouter:
         resubmit_match = self._RESUBMIT_PATTERN.match(text)
         if resubmit_match:
             return RoutedIntent(
-                operation="resubmit",
+                operation=Operation.RESUBMIT,
                 request_id=resubmit_match.group("request_id"),
                 text=resubmit_match.group("text").strip(),
             )
 
         if self._MY_PENDING_PATTERN.match(text):
-            return RoutedIntent(operation="my_pending", request_id="")
+            return RoutedIntent(operation=Operation.MY_PENDING, request_id="")
 
         if self._PENDING_APPROVALS_PATTERN.match(text):
-            return RoutedIntent(operation="pending_approvals", request_id="")
+            return RoutedIntent(operation=Operation.PENDING_APPROVALS, request_id="")
 
         return None

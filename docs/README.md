@@ -17,6 +17,7 @@ Use these docs to understand implementation direction:
 - [Scope And Channel Decision](./technical-design/scope-and-channel-decision.md)
 - [Architecture](./technical-design/architecture.md)
 - [Configuration And Integrations](./technical-design/configuration-and-integrations.md)
+- [Diagrams](./technical-design/diagrams.md)
 
 ## Delivery Plan
 

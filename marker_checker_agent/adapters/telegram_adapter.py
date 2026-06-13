@@ -15,6 +15,7 @@ from telegram.ext import (
 )
 
 from marker_checker_agent.config import TelegramConfig
+from marker_checker_agent.domain.enums import Operation
 from marker_checker_agent.orchestrator import AgentOrchestrator, MessageSource
 
 
@@ -100,16 +101,16 @@ class TelegramAdapter:
         await self._reply(update, response)
 
     async def _approve_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action="approve")
+        await self._handle_action_command(update, context, action=Operation.APPROVE)
 
     async def _reject_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action="reject")
+        await self._handle_action_command(update, context, action=Operation.REJECT)
 
     async def _needinfo_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action="needinfo")
+        await self._handle_action_command(update, context, action=Operation.NEEDINFO)
 
     async def _cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action="cancel")
+        await self._handle_action_command(update, context, action=Operation.CANCEL)
 
     async def _status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not context.args:

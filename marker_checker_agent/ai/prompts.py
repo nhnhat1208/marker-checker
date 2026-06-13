@@ -41,6 +41,29 @@ Be concise, factual, and clear about the new request state.
 Do not invent data.
 """.strip()
 
+INTENT_CLASSIFY_SYSTEM_PROMPT = """
+Classify a user message for a marker-checker approval workflow. Return JSON only.
+Keys: operation, request_id, note, text.
+
+Operations:
+- new_request: submit a new approval request (contains "change from X to Y" or "ask @someone to approve")
+- lookup: check status of an existing request
+- history: view timeline/history of an existing request
+- cancel: cancel an existing request
+- needinfo: ask for more information about a request
+- resubmit: resubmit or update an existing request with new text
+- my_pending: list the user's own active/pending requests
+- pending_approvals: list requests waiting for the user to approve
+- confirm: confirm a pending draft submission
+- unknown: cannot determine intent
+
+Rules:
+- request_id: the request ID if mentioned (e.g. REQ-123, REQ-ABC-456), empty string if none
+- note: any reason, comment or note the user mentioned, empty string if none
+- text: for resubmit only, the new request text after the request_id, empty string otherwise
+- Supports Vietnamese and English
+""".strip()
+
 
 def build_request_parse_user_prompt(message: str) -> str:
     return (
@@ -91,3 +114,7 @@ def build_action_result_user_prompt(*, action_result: str) -> str:
         "Rewrite this action result into one short user-facing message.\n"
         f"Action result:\n{action_result}"
     )
+
+
+def build_intent_classify_user_prompt(message: str) -> str:
+    return f"Classify this message:\nMessage: {message}"

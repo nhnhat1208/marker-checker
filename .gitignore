@@ -1,23 +1,40 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Secrets and local config
 .env
 .env.*
 .greennode.json
 .agentbase/
 .agentbase-state.json
 *.credentials.json
+runtime.yaml
+
+# Virtual environment
 .venv/
 venv/
-*.egg-info/
-dist/
-build/
+
+# uv
+.python-version
+
+# Test / coverage
 .pytest_cache/
-.mypy_cache/
-runtime.yaml
-.DS_Store
-.idea/
-.vscode/
 .coverage
 htmlcov/
 coverage/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
 *.log

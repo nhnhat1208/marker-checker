@@ -4,12 +4,12 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 
-from marker_checker_agent.ai_prompts import (
+from marker_checker_agent.ai.prompts import (
+    INTENT_CLASSIFY_SYSTEM_PROMPT,
     REQUEST_ACTION_RESULT_SYSTEM_PROMPT,
     REQUEST_CLARIFICATION_SYSTEM_PROMPT,
     REQUEST_CONFIRMATION_SYSTEM_PROMPT,
@@ -20,29 +20,27 @@ from marker_checker_agent.ai_prompts import (
     build_clarification_user_prompt,
     build_confirmation_user_prompt,
     build_history_summary_user_prompt,
+    build_intent_classify_user_prompt,
     build_request_parse_user_prompt,
     build_status_summary_user_prompt,
 )
+from marker_checker_agent.ai.types import (
+    MANAGEMENT_OPERATIONS,
+    AssistedParseResult,
+    ClassifiedIntent,
+)
 from marker_checker_agent.config import AIConfig
-from marker_checker_agent.request_parser import ParsedRequest, list_missing_required_fields
+from marker_checker_agent.domain.enums import Operation
+from marker_checker_agent.parsing.request_parser import ParsedRequest, list_missing_required_fields
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class AssistedParseResult:
-    parsed_request: ParsedRequest | None
-    guidance_message: str | None = None
-    parser_name: str = "pattern"
-    missing_fields: list[str] | None = None
-    validation_errors: list[str] | None = None
-    latency_ms: int | None = None
-    model: str | None = None
-    prompt_version: str | None = None
-
-
 class RequestInputAssistant(Protocol):
+    def classify_intent(self, text: str) -> ClassifiedIntent:
+        ...
+
     def assist_request_text(self, text: str) -> AssistedParseResult:
         ...
 
@@ -73,6 +71,31 @@ class OpenAICompatibleInputAssistant:
 
     def __init__(self, config: AIConfig) -> None:
         self._config = config
+
+    def classify_intent(self, text: str) -> ClassifiedIntent:
+        try:
+            content = self._invoke_completion_content(
+                system_prompt=INTENT_CLASSIFY_SYSTEM_PROMPT,
+                user_prompt=build_intent_classify_user_prompt(text),
+                max_tokens=80,
+            )
+            payload = self._parse_json_content(content)
+        except Exception as exc:
+            LOGGER.warning("LLM intent classification failed model=%s error=%s", self._config.model, exc)
+            return ClassifiedIntent(operation=Operation.UNKNOWN)
+
+        try:
+            operation = Operation(payload.get("operation", "").strip().lower())
+        except ValueError:
+            operation = Operation.UNKNOWN
+        if operation not in MANAGEMENT_OPERATIONS and operation != Operation.NEW_REQUEST:
+            operation = Operation.UNKNOWN
+        return ClassifiedIntent(
+            operation=operation,
+            request_id=payload.get("request_id", "").strip(),
+            note=payload.get("note", "").strip(),
+            text=payload.get("text", "").strip(),
+        )
 
     def assist_request_text(self, text: str) -> AssistedParseResult:
         started_at = time.perf_counter()
@@ -320,12 +343,12 @@ class OpenAICompatibleInputAssistant:
         missing_fields: list[str],
         validation_errors: list[str],
     ) -> str:
-        guidance_parts: list[str] = []
+        parts: list[str] = []
         if validation_errors:
-            guidance_parts.append("; ".join(validation_errors))
+            parts.append("; ".join(validation_errors))
         if missing_fields:
-            guidance_parts.append(f"Missing fields: {', '.join(missing_fields)}")
-        return ". ".join(guidance_parts) if guidance_parts else "Request needs clarification."
+            parts.append(f"Missing fields: {', '.join(missing_fields)}")
+        return ". ".join(parts) if parts else "Request needs clarification."
 
 
 def build_input_assistant(config: AIConfig) -> RequestInputAssistant | None:

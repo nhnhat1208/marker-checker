@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from marker_checker_agent.ai_input_assistance import AssistedParseResult
+from marker_checker_agent.ai import AssistedParseResult, ClassifiedIntent
+from marker_checker_agent.domain.enums import Operation
 from marker_checker_agent.orchestrator import AgentOrchestrator
-from marker_checker_agent.request_parser import ParsedRequest
+from marker_checker_agent.parsing.request_parser import ParsedRequest
 from tests.workflow_test_support import WorkflowTestCase
+
+
+class _NewRequestFakeBase:
+    def classify_intent(self, text: str) -> ClassifiedIntent:
+        return ClassifiedIntent(operation=Operation.NEW_REQUEST)
 
 
 class LlmAssistanceTest(WorkflowTestCase):
     def test_llm_input_assistance_can_build_draft(self) -> None:
-        class FakeInputAssistant:
+        class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
@@ -62,7 +68,7 @@ class LlmAssistanceTest(WorkflowTestCase):
         self.assertIn("LLM-assisted draft detected", draft_response["message"])
 
     def test_llm_input_assistance_handle_is_normalized(self) -> None:
-        class FakeInputAssistant:
+        class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
@@ -114,7 +120,7 @@ class LlmAssistanceTest(WorkflowTestCase):
         self.assertEqual(draft_response["draft"]["approver_handle"], "@checker")
 
     def test_llm_input_assistance_metadata_is_returned(self) -> None:
-        class FakeInputAssistant:
+        class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
@@ -181,7 +187,7 @@ class LlmAssistanceTest(WorkflowTestCase):
         )
 
     def test_llm_clarification_message_is_used(self) -> None:
-        class FakeInputAssistant:
+        class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
@@ -239,7 +245,7 @@ class LlmAssistanceTest(WorkflowTestCase):
         )
 
     def test_llm_status_and_history_summaries_are_returned(self) -> None:
-        class FakeInputAssistant:
+        class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
@@ -321,7 +327,7 @@ class LlmAssistanceTest(WorkflowTestCase):
         )
 
     def test_llm_action_result_message_is_used(self) -> None:
-        class FakeInputAssistant:
+        class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(

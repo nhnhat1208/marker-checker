@@ -1,7 +1,7 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class ReviewStatus(str, Enum):
+class ReviewStatus(StrEnum):
     DRAFT = "draft"
     SUBMITTED = "submitted"
     IN_REVIEW = "in_review"
@@ -11,7 +11,7 @@ class ReviewStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class AuditEventType(str, Enum):
+class AuditEventType(StrEnum):
     REQUEST_SUBMITTED = "request_submitted"
     MISSING_FIELDS_REQUESTED = "missing_fields_requested"
     REQUEST_DRAFT_UPDATED = "request_draft_updated"
@@ -21,3 +21,30 @@ class AuditEventType(str, Enum):
     DECISION_RECORDED = "decision_recorded"
     REQUEST_CANCELLED = "request_cancelled"
     LOOKUP_PERFORMED = "lookup_performed"
+
+
+class Operation(StrEnum):
+    # Approver actions
+    APPROVE = "approve"
+    REJECT = "reject"
+    NEEDINFO = "needinfo"
+    CANCEL = "cancel"
+    # Requester management operations
+    LOOKUP = "lookup"
+    HISTORY = "history"
+    RESUBMIT = "resubmit"
+    MY_PENDING = "my_pending"
+    PENDING_APPROVALS = "pending_approvals"
+    CONFIRM = "confirm"
+    # Intent classification sentinels
+    NEW_REQUEST = "new_request"
+    UNKNOWN = "unknown"
+
+
+class ResponseStatus(StrEnum):
+    OK = "ok"
+    ERROR = "error"
+    SUBMITTED = "submitted"
+    MISSING_FIELDS = "missing_fields"
+    CONFIRMATION_REQUIRED = "confirmation_required"
+    NEEDS_INPUT = "needs_input"
