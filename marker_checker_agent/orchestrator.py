@@ -86,8 +86,8 @@ class AgentOrchestrator:
     def discard_draft(self, requester_handle: str) -> dict[str, Any]:
         with self._draft_lock:
             draft = self._pending_drafts.pop(requester_handle, None)
-        self._pending_resubmit.pop(requester_handle, None)
-        self._partial_drafts.pop(requester_handle, None)
+            self._pending_resubmit.pop(requester_handle, None)
+            self._partial_drafts.pop(requester_handle, None)
         if draft is None:
             return {"status": ResponseStatus.ERROR, "message": "No pending draft to discard."}
         return {"status": ResponseStatus.OK, "message": "Pending draft discarded."}
@@ -120,8 +120,9 @@ class AgentOrchestrator:
         # Fast-path: exact rigid pattern, no LLM required
         parsed = parse_request_text(normalized)
         if parsed:
-            self._pending_resubmit.pop(requester_handle, None)
-            self._partial_drafts.pop(requester_handle, None)
+            with self._draft_lock:
+                self._pending_resubmit.pop(requester_handle, None)
+                self._partial_drafts.pop(requester_handle, None)
             return self._build_draft_response(
                 text=normalized,
                 parsed=parsed,
@@ -133,10 +134,11 @@ class AgentOrchestrator:
             )
 
         # Contextual resubmit: user received NEEDINFO, their next free-text = resubmission
-        if requester_handle in self._pending_resubmit:
-            request_id = self._pending_resubmit.pop(requester_handle)
+        with self._draft_lock:
+            pending_request_id = self._pending_resubmit.pop(requester_handle, None)
+        if pending_request_id is not None:
             return self.handle_resubmission(
-                request_id=request_id,
+                request_id=pending_request_id,
                 text=normalized,
                 actor_name=requester_name,
                 actor_handle=requester_handle,
@@ -162,11 +164,12 @@ class AgentOrchestrator:
         source: MessageSource,
     ) -> dict[str, Any]:
         # Short reply after MISSING_FIELDS: combine with original to fill in the missing field.
-        if requester_handle in self._partial_drafts and len(text) <= 80:
-            original_text, _ = self._partial_drafts.pop(requester_handle)
-            text = f"{original_text} {text}"
-        else:
-            self._partial_drafts.pop(requester_handle, None)
+        with self._draft_lock:
+            if requester_handle in self._partial_drafts and len(text) <= 80:
+                original_text, _ = self._partial_drafts.pop(requester_handle)
+                text = f"{original_text} {text}"
+            else:
+                self._partial_drafts.pop(requester_handle, None)
 
         intent = self._input_assistant.classify_intent(text)
 
@@ -253,7 +256,8 @@ class AgentOrchestrator:
                 else None
             )
             # Remember partial state so next short reply fills in the missing field.
-            self._partial_drafts[requester_handle] = (text, parsed)
+            with self._draft_lock:
+                self._partial_drafts[requester_handle] = (text, parsed)
             return {
                 "status": ResponseStatus.MISSING_FIELDS,
                 "message": (
@@ -332,7 +336,8 @@ class AgentOrchestrator:
                     source_channel=source.source_channel,
                     source_message_id=source.source_message_id,
                 )
-                self._pending_resubmit[record.requester_handle] = record.request_id
+                with self._draft_lock:
+                    self._pending_resubmit[record.requester_handle] = record.request_id
             elif action == Operation.CANCEL:
                 record = self._request_service.cancel_request(
                     request_id=request_id,
@@ -349,7 +354,8 @@ class AgentOrchestrator:
 
         # Clear any pending-resubmit state — request is resolved, resubmit would fail.
         if action in (Operation.APPROVE, Operation.REJECT, Operation.CANCEL):
-            self._pending_resubmit.pop(record.requester_handle, None)
+            with self._draft_lock:
+                self._pending_resubmit.pop(record.requester_handle, None)
 
         request_payload = self._request_service.get_request_summary(record.request_id)
         result_message = self._format_action_result_message(
