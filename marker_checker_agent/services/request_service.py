@@ -209,10 +209,11 @@ class RequestService:
                 f"Cannot resubmit request {request_id} from status {record.review_status}"
             )
 
+        now = utc_now()
         record.current_revision += 1
         record.last_submitted_revision = record.current_revision
-        record.last_submitted_at = utc_now()
-        record.updated_at = utc_now()
+        record.last_submitted_at = now
+        record.updated_at = now
         record.target_label = target_label
         record.change_from_summary = change_from_summary
         record.change_to_summary = change_to_summary
@@ -425,17 +426,18 @@ class RequestService:
             )
 
         self._validate_transition(current_status, to_status)
+        now = utc_now()
         record.review_status = to_status.value
-        record.updated_at = utc_now()
+        record.updated_at = now
 
         if to_status in {ReviewStatus.APPROVED, ReviewStatus.REJECTED}:
-            record.resolved_at = utc_now()
+            record.resolved_at = now
             record.resolution_note = note
             record.resolved_by_name = actor_name
             record.resolved_by_handle = actor_handle
 
         if to_status == ReviewStatus.CANCELLED:
-            record.cancelled_at = utc_now()
+            record.cancelled_at = now
             record.cancelled_by_handle = actor_handle
             record.cancellation_note = note
 

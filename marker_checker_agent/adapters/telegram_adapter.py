@@ -117,7 +117,10 @@ class TelegramAdapter:
         self._loop: asyncio.AbstractEventLoop | None = None
         # Maps @handle / telegram:<id> → Telegram chat_id string.
         # LRUCache: caps memory at 4096 user entries; no TTL needed (chat IDs don't expire).
+        # _registry_lock: LRUCache is not thread-safe; notify_approver is called from a
+        # thread-pool thread (asyncio.to_thread) while _register_user runs on the event loop.
         self._chat_registry: LRUCache[str, str] = LRUCache(maxsize=4096)
+        self._registry_lock = threading.Lock()
 
     def start_polling(self) -> None:
         if not self._config.enabled:
@@ -139,7 +142,8 @@ class TelegramAdapter:
 
     def notify_approver(self, payload: dict[str, Any]) -> None:
         approver_handle = payload.get("approver_handle", "")
-        chat_id = self._chat_registry.get(approver_handle)
+        with self._registry_lock:
+            chat_id = self._chat_registry.get(approver_handle)
         if not chat_id:
             LOGGER.info(
                 "notify_approver: no chat_id for %s (not yet interacted with bot)",
@@ -168,11 +172,15 @@ class TelegramAdapter:
         if not self._application or not self._loop or not self._loop.is_running():
             LOGGER.info("_send_message: event loop not available, message not sent to %s", chat_id)
             return
-        asyncio.run_coroutine_threadsafe(
+        future = asyncio.run_coroutine_threadsafe(
             self._application.bot.send_message(
                 chat_id=chat_id, text=text, reply_markup=reply_markup
             ),
             self._loop,
+        )
+        future.add_done_callback(
+            lambda f: LOGGER.warning("_send_message failed chat_id=%s error=%s", chat_id, f.exception())
+            if f.exception() else None
         )
 
     def _build_application(self, bot_token: str) -> Application:
@@ -410,10 +418,10 @@ class TelegramAdapter:
             note="",
             source=self._source_from_update(update),
         )
-        await query.edit_message_text(
-            text=_format_response_text(response),
-            reply_markup=None,
-        )
+        text = _format_response_text(response)
+        if len(text) > _MAX_MSG_LEN:
+            text = text[: _MAX_MSG_LEN - 6] + "\n[…]"
+        await query.edit_message_text(text=text, reply_markup=None)
 
     async def _reply(self, update: Update, response: dict) -> None:
         text = _format_response_text(response)
@@ -429,9 +437,10 @@ class TelegramAdapter:
         if not user or not chat:
             return
         chat_id = str(chat.id)
-        if user.username:
-            self._chat_registry[f"@{user.username}"] = chat_id
-        self._chat_registry[f"telegram:{user.id}"] = chat_id
+        with self._registry_lock:
+            if user.username:
+                self._chat_registry[f"@{user.username}"] = chat_id
+            self._chat_registry[f"telegram:{user.id}"] = chat_id
 
     def _source_from_update(self, update: Update) -> MessageSource:
         chat_id = str(update.effective_chat.id) if update.effective_chat else None

@@ -12,7 +12,6 @@ LOGGER = logging.getLogger(__name__)
 
 from marker_checker_agent.ai.assistant import RequestInputAssistant
 from marker_checker_agent.ai.types import (
-    MANAGEMENT_OPERATIONS,
     AssistedParseResult,
     IntentManagement,
     IntentNewRequest,
