@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from telegram.constants import ChatAction
+from telegram.error import NetworkError
 
 from marker_checker_agent.domain.enums import Operation
 from marker_checker_agent.domain.models import ActorContext, MessageSource, WorkflowAction
@@ -128,6 +129,12 @@ class TelegramCommandsMixin:
         if user.username:
             return f"@{user.username}"
         return f"telegram:{user.id}"
+
+    async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if isinstance(context.error, NetworkError):
+            LOGGER.debug("Telegram network error (PTB will retry): %s", context.error)
+        else:
+            LOGGER.exception("Unhandled bot error", exc_info=context.error)
 
     # --- command handlers ---
 

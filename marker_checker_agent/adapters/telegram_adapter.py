@@ -161,6 +161,7 @@ class TelegramAdapter(TelegramCommandsMixin):
         application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._text_message)
         )
+        application.add_error_handler(self._error_handler)
         return application
 
     def _run_polling(self) -> None:

@@ -41,11 +41,15 @@ class LLMClient:
             },
         )
         response.raise_for_status()
-        payload = response.json()
-        message = payload["choices"][0]["message"]
+        data = response.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise ValueError("LLM response contained no choices.")
+        choice = choices[0]
+        message = choice.get("message") or {}
         content = message.get("content")
         if not content:
-            finish_reason = payload["choices"][0].get("finish_reason", "unknown")
+            finish_reason = choice.get("finish_reason", "unknown")
             raise ValueError(
                 f"LLM returned empty content (finish_reason={finish_reason!r}). "
                 "The model may have run out of tokens during reasoning — increase max_tokens."
