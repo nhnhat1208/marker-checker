@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from marker_checker_agent.domain.models import (
-    AuditEventRecord,
-    RequestConversationRecord,
-    RequestRecord,
-)
+if TYPE_CHECKING:
+    from marker_checker_agent.domain.models import (
+        AuditEventRecord,
+        RequestConversationRecord,
+        RequestRecord,
+    )
 
 
 class WorkflowStore(Protocol):

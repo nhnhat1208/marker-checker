@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from marker_checker_agent.domain.enums import Operation
+from marker_checker_agent.domain.models import ActorContext, WorkflowAction
 from tests.workflow_test_support import WorkflowTestCase
 
 
@@ -7,16 +9,14 @@ class RequestFlowTest(WorkflowTestCase):
     def test_submit_approve_lookup_and_history(self) -> None:
         draft_response = self.orchestrator.handle_requester_message(
             text="for sample-object, change from disabled to enabled, ask @checker to approve",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(draft_response["status"], "confirmation_required")
 
         submit_response = self.orchestrator.handle_requester_message(
             text="/confirm",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(submit_response["status"], "submitted")
@@ -25,11 +25,8 @@ class RequestFlowTest(WorkflowTestCase):
         self.assertEqual(len(self.notifications), 1)
 
         approve_response = self.orchestrator.handle_approver_action(
-            action="approve",
-            request_id=request_id,
-            actor_name="Checker One",
-            actor_handle="@checker",
-            note="looks good",
+            actor=ActorContext(name="Checker One", handle="@checker"),
+            action=WorkflowAction(action=Operation.APPROVE, request_id=request_id, note="looks good"),
             source=self.source,
         )
         self.assertEqual(approve_response["status"], "ok")
@@ -61,24 +58,21 @@ class RequestFlowTest(WorkflowTestCase):
     def test_needinfo_then_resubmit(self) -> None:
         self.orchestrator.handle_requester_message(
             text="for sample-object, change from old-state to new-state, ask @checker to approve",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         submit_response = self.orchestrator.handle_requester_message(
             text="/confirm",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         request_id = submit_response["request"]["request_id"]
 
         needinfo_response = self.orchestrator.handle_approver_action(
-            action="needinfo",
-            request_id=request_id,
-            actor_name="Checker One",
-            actor_handle="@checker",
-            note="please clarify target state",
+            actor=ActorContext(name="Checker One", handle="@checker"),
+            action=WorkflowAction(
+                action=Operation.NEEDINFO, request_id=request_id, note="please clarify target state"
+            ),
             source=self.source,
         )
         self.assertEqual(needinfo_response["status"], "ok")
@@ -90,8 +84,7 @@ class RequestFlowTest(WorkflowTestCase):
         resubmit_response = self.orchestrator.handle_resubmission(
             request_id=request_id,
             text="for sample-object, change from old-state to new-state-v2, ask @checker to approve",
-            actor_name="Requester One",
-            actor_handle="@requester",
+            actor=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(resubmit_response["status"], "ok")

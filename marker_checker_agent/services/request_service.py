@@ -1,20 +1,29 @@
 from __future__ import annotations
 
-import re
-from difflib import SequenceMatcher
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from marker_checker_agent.config import RuntimeConfig
-from marker_checker_agent.domain.enums import AuditEventType, ReviewStatus
-from marker_checker_agent.domain.models import RequestConversationRecord, RequestRecord, RequestSummary
-from marker_checker_agent.persistence.base import WorkflowStore
-from marker_checker_agent.services.audit_service import AuditService
-from marker_checker_agent.time_utils import utc_now
+from marker_checker_agent.domain.enums import ActorKind, AuditEventType, ConversationRole, ReviewStatus
+from marker_checker_agent.domain.models import (
+    ActorContext,
+    AuditEventInput,
+    ChangeRequest,
+    EventPayload,
+    MessageSource,
+    RequestConversationRecord,
+    RequestRecord,
+    RequestSummary,
+)
+from marker_checker_agent.services.workflow_transitions import validate_transition
+from marker_checker_agent.utils.text_search import target_match_score
+from marker_checker_agent.utils.time_utils import utc_now
 
+if TYPE_CHECKING:
+    from datetime import datetime
 
-class InvalidTransitionError(ValueError):
-    """Raised when a workflow transition is not allowed."""
+    from marker_checker_agent.config import RuntimeConfig
+    from marker_checker_agent.persistence.base import WorkflowStore
+    from marker_checker_agent.services.audit_service import AuditService
 
 
 class RequestNotFoundError(LookupError):
@@ -22,28 +31,6 @@ class RequestNotFoundError(LookupError):
 
 
 class RequestService:
-    _allowed_transitions: dict[ReviewStatus, set[ReviewStatus]] = {
-        ReviewStatus.SUBMITTED: {
-            ReviewStatus.NEEDS_INFO,
-            ReviewStatus.APPROVED,
-            ReviewStatus.REJECTED,
-            ReviewStatus.CANCELLED,
-        },
-        ReviewStatus.NEEDS_INFO: {
-            ReviewStatus.SUBMITTED,
-            ReviewStatus.CANCELLED,
-        },
-        ReviewStatus.APPROVED: set(),
-        ReviewStatus.REJECTED: set(),
-        ReviewStatus.CANCELLED: set(),
-        ReviewStatus.DRAFT: {ReviewStatus.SUBMITTED},
-        ReviewStatus.IN_REVIEW: {
-            ReviewStatus.NEEDS_INFO,
-            ReviewStatus.APPROVED,
-            ReviewStatus.REJECTED,
-            ReviewStatus.CANCELLED,
-        },
-    }
 
     def __init__(
         self,
@@ -59,100 +46,60 @@ class RequestService:
     def create_request(
         self,
         *,
-        request_text: str,
-        requester_name: str | None,
-        requester_handle: str,
-        approver_name: str | None,
-        approver_handle: str,
-        target_label: str,
-        change_from_summary: str,
-        change_to_summary: str,
-        business_reason: str | None,
-        source_channel: str,
-        channel_id: str | None,
-        thread_id: str | None,
-        source_message_id: str | None,
+        requester: ActorContext,
+        change: ChangeRequest,
+        source: MessageSource,
     ) -> RequestRecord:
         request_id = self._generate_request_id()
         now = utc_now()
 
         record = RequestRecord(
             request_id=request_id,
-            request_text=request_text,
-            requester_name=requester_name,
-            requester_handle=requester_handle,
-            approver_name=approver_name,
-            approver_handle=approver_handle,
-            target_label=target_label,
-            change_from_summary=change_from_summary,
-            change_to_summary=change_to_summary,
-            business_reason=business_reason,
-            review_status=ReviewStatus.SUBMITTED.value,
+            request_text=change.request_text,
+            requester_name=requester.name,
+            requester_handle=requester.handle,
+            approver_name=None,
+            approver_handle=change.approver_handle,
+            target_label=change.target_label,
+            change_from_summary=change.change_from_summary,
+            change_to_summary=change.change_to_summary,
+            business_reason=change.business_reason,
+            review_status=ReviewStatus.SUBMITTED,
             current_revision=1,
             last_submitted_revision=1,
             last_submitted_at=now,
             created_at=now,
             updated_at=now,
-            origin_channel_id=channel_id,
-            origin_thread_id=thread_id,
-            origin_message_id=source_message_id,
+            origin_channel_id=source.channel_id,
+            origin_thread_id=source.thread_id,
+            origin_message_id=source.source_message_id,
         )
         self._workflow_store.create_request(record)
-        self._workflow_store.create_request_conversation(
-            RequestConversationRecord(
-                request_id=request_id,
-                actor_handle=requester_handle,
-                conversation_role="requester_followup",
-                channel_id=channel_id,
-                thread_id=thread_id,
-                conversation_id=channel_id,
-                linked_at=now,
-                last_seen_at=now,
-            )
+        self._link_conversation(
+            request_id=request_id, actor_handle=requester.handle,
+            role=ConversationRole.REQUESTER_FOLLOWUP, source=source, now=now,
         )
-        self._workflow_store.create_request_conversation(
-            RequestConversationRecord(
-                request_id=request_id,
-                actor_handle=approver_handle,
-                conversation_role="approver_review",
-                channel_id=channel_id,
-                thread_id=thread_id,
-                conversation_id=channel_id,
-                linked_at=now,
-                last_seen_at=now,
-            )
+        self._link_conversation(
+            request_id=request_id, actor_handle=change.approver_handle,
+            role=ConversationRole.APPROVER_REVIEW, source=source, now=now,
         )
 
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.REQUEST_SUBMITTED,
-            actor_name=requester_name,
-            actor_handle=requester_handle,
-            actor_kind="requester",
-            request_revision=1,
-            summary="Request submitted",
-            event_payload={
-                "target_label": target_label,
-                "change_from_summary": change_from_summary,
-                "change_to_summary": change_to_summary,
-                "approver_handle": approver_handle,
+        self._emit_event(
+            request_id=request_id, actor=requester, source=source,
+            event_type=AuditEventType.REQUEST_SUBMITTED, actor_kind=ActorKind.REQUESTER,
+            revision=1, summary="Request submitted",
+            payload={
+                "target_label": change.target_label,
+                "change_from_summary": change.change_from_summary,
+                "change_to_summary": change.change_to_summary,
+                "approver_handle": change.approver_handle,
             },
-            source_channel=source_channel,
-            thread_id=thread_id,
-            source_message_id=source_message_id,
         )
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.APPROVER_NOTIFIED,
-            actor_name=requester_name,
-            actor_handle=requester_handle,
-            actor_kind="agent",
-            request_revision=1,
-            summary="Approver notification queued",
-            event_payload={"approver_handle": approver_handle},
-            source_channel=source_channel,
-            thread_id=thread_id,
-            source_message_id=source_message_id,
+        self._emit_event(
+            request_id=request_id, actor=requester, source=source,
+            event_type=AuditEventType.APPROVER_NOTIFIED, actor_kind=ActorKind.AGENT,
+            revision=1, summary="Approver notification queued",
+            payload={"approver_handle": change.approver_handle},
         )
         return record
 
@@ -160,31 +107,21 @@ class RequestService:
         self,
         *,
         request_id: str,
-        actor_name: str | None,
-        actor_handle: str,
+        actor: ActorContext,
         note: str,
-        source_channel: str,
-        source_message_id: str | None,
+        source: MessageSource,
     ) -> RequestRecord:
         record = self._change_status(
             request_id=request_id,
-            from_statuses={ReviewStatus.SUBMITTED, ReviewStatus.IN_REVIEW},
             to_status=ReviewStatus.NEEDS_INFO,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
+            actor=actor,
             note=note,
         )
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.NEEDS_INFO_REQUESTED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
-            actor_kind="approver",
-            request_revision=record.last_submitted_revision,
-            summary="Approver requested more information",
-            event_payload={"note": note},
-            source_channel=source_channel,
-            source_message_id=source_message_id,
+        self._emit_event(
+            request_id=request_id, actor=actor, source=source,
+            event_type=AuditEventType.NEEDS_INFO_REQUESTED, actor_kind=ActorKind.APPROVER,
+            revision=record.last_submitted_revision, summary="Approver requested more information",
+            payload={"note": note},
         )
         return record
 
@@ -192,52 +129,36 @@ class RequestService:
         self,
         *,
         request_id: str,
-        actor_name: str | None,
-        actor_handle: str,
-        target_label: str,
-        change_from_summary: str,
-        change_to_summary: str,
-        business_reason: str | None,
-        request_text: str,
-        source_channel: str,
-        source_message_id: str | None,
+        actor: ActorContext,
+        change: ChangeRequest,
+        source: MessageSource,
     ) -> RequestRecord:
         record = self.get_request(request_id)
-        current_status = ReviewStatus(record.review_status)
-        if current_status != ReviewStatus.NEEDS_INFO:
-            raise InvalidTransitionError(
-                f"Cannot resubmit request {request_id} from status {record.review_status}"
-            )
+        validate_transition(record.review_status, ReviewStatus.SUBMITTED)
 
         now = utc_now()
+        record.review_status = ReviewStatus.SUBMITTED
         record.current_revision += 1
         record.last_submitted_revision = record.current_revision
         record.last_submitted_at = now
         record.updated_at = now
-        record.target_label = target_label
-        record.change_from_summary = change_from_summary
-        record.change_to_summary = change_to_summary
-        record.business_reason = business_reason
-        record.request_text = request_text
-        record.review_status = ReviewStatus.SUBMITTED.value
+        record.target_label = change.target_label
+        record.change_from_summary = change.change_from_summary
+        record.change_to_summary = change.change_to_summary
+        record.business_reason = change.business_reason
+        record.request_text = change.request_text
         self._workflow_store.update_request(record)
 
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.REQUEST_RESUBMITTED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
-            actor_kind="requester",
-            request_revision=record.last_submitted_revision,
-            summary="Requester resubmitted the request",
-            event_payload={
-                "target_label": target_label,
-                "change_from_summary": change_from_summary,
-                "change_to_summary": change_to_summary,
-                "business_reason": business_reason,
+        self._emit_event(
+            request_id=request_id, actor=actor, source=source,
+            event_type=AuditEventType.REQUEST_RESUBMITTED, actor_kind=ActorKind.REQUESTER,
+            revision=record.last_submitted_revision, summary="Requester resubmitted the request",
+            payload={
+                "target_label": change.target_label,
+                "change_from_summary": change.change_from_summary,
+                "change_to_summary": change.change_to_summary,
+                "business_reason": change.business_reason,
             },
-            source_channel=source_channel,
-            source_message_id=source_message_id,
         )
         return record
 
@@ -245,31 +166,21 @@ class RequestService:
         self,
         *,
         request_id: str,
-        actor_name: str | None,
-        actor_handle: str,
+        actor: ActorContext,
         note: str | None,
-        source_channel: str,
-        source_message_id: str | None,
+        source: MessageSource,
     ) -> RequestRecord:
         record = self._change_status(
             request_id=request_id,
-            from_statuses={ReviewStatus.SUBMITTED, ReviewStatus.IN_REVIEW},
             to_status=ReviewStatus.APPROVED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
+            actor=actor,
             note=note,
         )
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.DECISION_RECORDED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
-            actor_kind="approver",
-            request_revision=record.last_submitted_revision,
-            summary="Approver approved the request",
-            event_payload={"decision": "approved", "note": note},
-            source_channel=source_channel,
-            source_message_id=source_message_id,
+        self._emit_event(
+            request_id=request_id, actor=actor, source=source,
+            event_type=AuditEventType.DECISION_RECORDED, actor_kind=ActorKind.APPROVER,
+            revision=record.last_submitted_revision, summary="Approver approved the request",
+            payload={"decision": "approved", "note": note},
         )
         return record
 
@@ -277,34 +188,24 @@ class RequestService:
         self,
         *,
         request_id: str,
-        actor_name: str | None,
-        actor_handle: str,
-        reason: str,
-        source_channel: str,
-        source_message_id: str | None,
+        actor: ActorContext,
+        note: str,
+        source: MessageSource,
     ) -> RequestRecord:
-        if self._config.workflow.reject_requires_reason and not reason.strip():
+        if self._config.workflow.reject_requires_reason and not note.strip():
             raise ValueError("Rejection reason is required")
 
         record = self._change_status(
             request_id=request_id,
-            from_statuses={ReviewStatus.SUBMITTED, ReviewStatus.IN_REVIEW},
             to_status=ReviewStatus.REJECTED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
-            note=reason,
+            actor=actor,
+            note=note,
         )
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.DECISION_RECORDED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
-            actor_kind="approver",
-            request_revision=record.last_submitted_revision,
-            summary="Approver rejected the request",
-            event_payload={"decision": "rejected", "reason": reason},
-            source_channel=source_channel,
-            source_message_id=source_message_id,
+        self._emit_event(
+            request_id=request_id, actor=actor, source=source,
+            event_type=AuditEventType.DECISION_RECORDED, actor_kind=ActorKind.APPROVER,
+            revision=record.last_submitted_revision, summary="Approver rejected the request",
+            payload={"decision": "rejected", "note": note},
         )
         return record
 
@@ -312,31 +213,21 @@ class RequestService:
         self,
         *,
         request_id: str,
-        actor_name: str | None,
-        actor_handle: str,
+        actor: ActorContext,
         note: str | None,
-        source_channel: str,
-        source_message_id: str | None,
+        source: MessageSource,
     ) -> RequestRecord:
         record = self._change_status(
             request_id=request_id,
-            from_statuses={ReviewStatus.SUBMITTED, ReviewStatus.NEEDS_INFO, ReviewStatus.IN_REVIEW},
             to_status=ReviewStatus.CANCELLED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
+            actor=actor,
             note=note,
         )
-        self._audit_service.record_event(
-            request_id=request_id,
-            event_type=AuditEventType.REQUEST_CANCELLED,
-            actor_name=actor_name,
-            actor_handle=actor_handle,
-            actor_kind="requester",
-            request_revision=record.last_submitted_revision,
-            summary="Request was cancelled",
-            event_payload={"note": note},
-            source_channel=source_channel,
-            source_message_id=source_message_id,
+        self._emit_event(
+            request_id=request_id, actor=actor, source=source,
+            event_type=AuditEventType.REQUEST_CANCELLED, actor_kind=ActorKind.REQUESTER,
+            revision=record.last_submitted_revision, summary="Request was cancelled",
+            payload={"note": note},
         )
         return record
 
@@ -358,7 +249,7 @@ class RequestService:
         *,
         requester_handle: str | None = None,
         approver_handle: str | None = None,
-        review_statuses: set[str] | None = None,
+        review_statuses: set[ReviewStatus] | None = None,
     ) -> list[RequestSummary]:
         records = self._workflow_store.list_requests()
         filtered: list[RequestRecord] = []
@@ -381,9 +272,9 @@ class RequestService:
         records = self._workflow_store.list_requests()
         scored: list[tuple[float, RequestRecord]] = []
         for record in records:
-            target_score = _target_match_score(q, record.target_label.lower())
-            id_score = _target_match_score(q, record.request_id.lower())
-            score = max(target_score, id_score)
+            ts = target_match_score(q, record.target_label.lower())
+            id_score = target_match_score(q, record.request_id.lower())
+            score = max(ts, id_score)
             if score > 0:
                 scored.append((score, record))
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -393,9 +284,9 @@ class RequestService:
         return self.list_request_summaries(
             requester_handle=requester_handle,
             review_statuses={
-                ReviewStatus.SUBMITTED.value,
-                ReviewStatus.NEEDS_INFO.value,
-                ReviewStatus.IN_REVIEW.value,
+                ReviewStatus.SUBMITTED,
+                ReviewStatus.NEEDS_INFO,
+                ReviewStatus.IN_REVIEW,
             },
         )
 
@@ -403,53 +294,85 @@ class RequestService:
         return self.list_request_summaries(
             approver_handle=approver_handle,
             review_statuses={
-                ReviewStatus.SUBMITTED.value,
-                ReviewStatus.IN_REVIEW.value,
+                ReviewStatus.SUBMITTED,
+                ReviewStatus.IN_REVIEW,
             },
+        )
+
+    def _emit_event(
+        self,
+        *,
+        request_id: str,
+        actor: ActorContext,
+        source: MessageSource,
+        event_type: AuditEventType,
+        actor_kind: ActorKind,
+        revision: int | None,
+        summary: str,
+        payload: EventPayload,
+    ) -> None:
+        self._audit_service.record_event(
+            request_id=request_id,
+            actor=actor,
+            event=AuditEventInput(
+                event_type=event_type,
+                actor_kind=actor_kind,
+                request_revision=revision,
+                summary=summary,
+                event_payload=payload,
+                source=source,
+            ),
         )
 
     def _change_status(
         self,
         *,
         request_id: str,
-        from_statuses: set[ReviewStatus],
         to_status: ReviewStatus,
-        actor_name: str | None,
-        actor_handle: str,
+        actor: ActorContext,
         note: str | None,
     ) -> RequestRecord:
         record = self.get_request(request_id)
-        current_status = ReviewStatus(record.review_status)
-        if current_status not in from_statuses:
-            raise InvalidTransitionError(
-                f"Cannot move request {request_id} from {record.review_status} to {to_status.value}"
-            )
-
-        self._validate_transition(current_status, to_status)
+        validate_transition(record.review_status, to_status)
         now = utc_now()
-        record.review_status = to_status.value
+        record.review_status = to_status
         record.updated_at = now
 
         if to_status in {ReviewStatus.APPROVED, ReviewStatus.REJECTED}:
             record.resolved_at = now
             record.resolution_note = note
-            record.resolved_by_name = actor_name
-            record.resolved_by_handle = actor_handle
+            record.resolved_by_name = actor.name or None  # empty string → None for storage
+            record.resolved_by_handle = actor.handle
 
         if to_status == ReviewStatus.CANCELLED:
             record.cancelled_at = now
-            record.cancelled_by_handle = actor_handle
+            record.cancelled_by_handle = actor.handle
             record.cancellation_note = note
 
         self._workflow_store.update_request(record)
         return record
 
-    def _validate_transition(self, current_status: ReviewStatus, to_status: ReviewStatus) -> None:
-        allowed = self._allowed_transitions.get(current_status, set())
-        if to_status not in allowed:
-            raise InvalidTransitionError(
-                f"Transition {current_status.value} -> {to_status.value} is not allowed"
+    def _link_conversation(
+        self,
+        *,
+        request_id: str,
+        actor_handle: str,
+        role: ConversationRole,
+        source: MessageSource,
+        now: datetime,
+    ) -> None:
+        self._workflow_store.create_request_conversation(
+            RequestConversationRecord(
+                request_id=request_id,
+                actor_handle=actor_handle,
+                conversation_role=role,
+                channel_id=source.channel_id,
+                thread_id=source.thread_id,
+                conversation_id=source.channel_id,
+                linked_at=now,
+                last_seen_at=now,
             )
+        )
 
     def _generate_request_id(self) -> str:
         suffix = uuid4().hex[:8].upper()
@@ -463,56 +386,8 @@ class RequestService:
             target_label=record.target_label,
             change_from_summary=record.change_from_summary,
             change_to_summary=record.change_to_summary,
-            review_status=record.review_status,
+            review_status=record.review_status.value,
             current_revision=record.current_revision,
             last_submitted_revision=record.last_submitted_revision,
             updated_at=record.updated_at.isoformat(),
         )
-
-
-def _tokenize(text: str) -> list[str]:
-    return re.split(r"[-_\s]+", text)
-
-
-def _target_match_score(query: str, target: str) -> float:
-    """Return a match score in [0, 1]. 0 means no match."""
-    # 1. Exact substring — highest confidence
-    if query in target:
-        return 1.0
-
-    # 2. Normalized: treat -/_/space as the same character
-    norm_query = re.sub(r"[-_\s]+", "", query)
-    norm_target = re.sub(r"[-_\s]+", "", target)
-    if norm_query and norm_query in norm_target:
-        return 0.95
-
-    # 3. Token overlap: any query token fully matches any target token
-    q_tokens = _tokenize(query)
-    t_tokens = _tokenize(target)
-    if any(qt in t_tokens for qt in q_tokens if len(qt) >= 2):
-        return 0.85
-
-    # 4. Partial token prefix: any query token is a prefix of a target token (≥3 chars)
-    if any(
-        tt.startswith(qt)
-        for qt in q_tokens
-        for tt in t_tokens
-        if len(qt) >= 3
-    ):
-        return 0.7
-
-    # 5. Abbreviation / subsequence: all query chars appear in order in norm_target (≥3 chars)
-    if len(norm_query) >= 3 and _is_subsequence(norm_query, norm_target):
-        return 0.6
-
-    # 6. Fuzzy ratio via difflib — handles typos
-    ratio = SequenceMatcher(None, query, target).ratio()
-    if ratio >= 0.7:
-        return round(ratio * 0.65, 3)
-
-    return 0.0
-
-
-def _is_subsequence(query: str, target: str) -> bool:
-    it = iter(target)
-    return all(c in it for c in query)

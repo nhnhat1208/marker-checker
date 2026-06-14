@@ -9,13 +9,18 @@ Coverage:
 """
 from __future__ import annotations
 
-from marker_checker_agent.ai import AssistedParseResult, IntentManagement, IntentNewRequest, IntentUnknown
+from marker_checker_agent.ai.intent_types import (
+    AssistedParseResult,
+    IntentManagement,
+    IntentNewRequest,
+    IntentUnknown,
+)
 from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.orchestrator import AgentOrchestrator
+from marker_checker_agent.domain.models import ActorContext
 from marker_checker_agent.parsing.intent_router import FreeformIntentRouter
 from marker_checker_agent.parsing.request_parser import ParsedRequest
+from marker_checker_agent.request_coordinator import RequestCoordinator
 from tests.workflow_test_support import WorkflowTestCase
-
 
 # ---------------------------------------------------------------------------
 # Regex router unit tests (no orchestrator, no LLM)
@@ -63,7 +68,10 @@ class IntentRouterPatternTest(WorkflowTestCase):
     # --- MY_PENDING English regex ---
 
     def test_list_requests_routed(self) -> None:
-        for text in ("list requests", "list my requests", "show requests", "my pending requests", "my requests"):
+        for text in (
+            "list requests", "list my requests", "show requests",
+            "my pending requests", "my requests",
+        ):
             with self.subTest(text=text):
                 result = self._route(text)
                 self.assertIsNotNone(result)
@@ -113,7 +121,9 @@ class _FakeAssistantBase:
         self.assist_called_with.append(text)
         return AssistedParseResult(parsed_request=None, parser_name="llm_assisted")
 
-    def generate_clarification_message(self, *, original_message, missing_fields, validation_errors) -> str | None:
+    def generate_clarification_message(
+        self, *, original_message, missing_fields, validation_errors
+    ) -> str | None:
         return None
 
     def generate_confirmation_message(self, *, parsed_request_summary) -> str | None:
@@ -131,8 +141,8 @@ class _FakeAssistantBase:
 
 class LlmIntentRoutingTest(WorkflowTestCase):
 
-    def _make_orchestrator(self, assistant) -> AgentOrchestrator:
-        orc = AgentOrchestrator(
+    def _make_orchestrator(self, assistant) -> RequestCoordinator:
+        orc = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=assistant,
@@ -140,17 +150,15 @@ class LlmIntentRoutingTest(WorkflowTestCase):
         orc.set_approver_notification_callback(self.notifications.append)
         return orc
 
-    def _submit_request(self, orc: AgentOrchestrator) -> str:
+    def _submit_request(self, orc: RequestCoordinator) -> str:
         orc.handle_requester_message(
             text="for sample-object, change from disabled to enabled, ask @checker to approve",
-            requester_name="Requester",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester", handle="@requester"),
             source=self.source,
         )
         resp = orc.handle_requester_message(
             text="/confirm",
-            requester_name="Requester",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester", handle="@requester"),
             source=self.source,
         )
         return resp["request"]["request_id"]
@@ -167,8 +175,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
         orc = self._make_orchestrator(fake)
         resp = orc.handle_requester_message(
             text="gibberish that makes no sense",
-            requester_name="User",
-            requester_handle="@user",
+            requester=ActorContext(name="User", handle="@user"),
             source=self.source,
         )
         self.assertEqual(resp["status"], "needs_input")
@@ -188,8 +195,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
 
         resp = orc.handle_requester_message(
             text="list các request được tạo",
-            requester_name="Requester",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(resp["status"], "ok")
@@ -211,8 +217,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
 
         resp = orc.handle_requester_message(
             text="các request chờ tôi duyệt",
-            requester_name="Checker",
-            requester_handle="@checker",
+            requester=ActorContext(name="Checker", handle="@checker"),
             source=self.source,
         )
         self.assertEqual(resp["status"], "ok")
@@ -223,6 +228,8 @@ class LlmIntentRoutingTest(WorkflowTestCase):
 
     def test_llm_routes_vietnamese_cancel(self) -> None:
         class Fake(_FakeAssistantBase):
+            _target_id: str = ""
+
             def classify_intent(self, text):
                 self.classify_called_with.append(text)
                 return IntentManagement(
@@ -238,8 +245,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
 
         resp = orc.handle_requester_message(
             text=f"hủy {request_id} không cần nữa",
-            requester_name="Requester",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(resp["status"], "ok")
@@ -269,8 +275,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
         orc = self._make_orchestrator(fake)
         resp = orc.handle_requester_message(
             text="tắt api-gateway, nhờ @checker duyệt",
-            requester_name="Requester",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(resp["status"], "confirmation_required")

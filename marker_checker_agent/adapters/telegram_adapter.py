@@ -3,26 +3,27 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cachetools import LRUCache
-
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ChatAction
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
-    ContextTypes,
     MessageHandler,
     filters,
 )
 
-from marker_checker_agent.config import TelegramConfig
-from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.orchestrator import AgentOrchestrator, MessageSource
+from marker_checker_agent.adapters.telegram_handlers import TelegramCommandsMixin
 
+if TYPE_CHECKING:
+    from marker_checker_agent.config import TelegramConfig
+    from marker_checker_agent.domain.models import RequestSummary
+    from marker_checker_agent.request_coordinator import RequestCoordinator
+
+BotApplication = Application[Any, Any, Any, Any, Any, Any]
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,28 +31,6 @@ LOGGER = logging.getLogger(__name__)
 _CB_APPROVE = "approve"
 _CB_REJECT = "reject"
 _CB_NEEDINFO = "needinfo"
-
-
-def _format_response_text(response: dict) -> str:
-    if message := response.get("message"):
-        return message
-    if summary := response.get("summary_message"):
-        return summary
-    if request := response.get("request"):
-        return "\n".join([
-            f"request_id: {request.get('request_id')}",
-            f"status:     {request.get('review_status')}",
-            f"target:     {request.get('target_label')}",
-            f"from:       {request.get('change_from_summary')}",
-            f"to:         {request.get('change_to_summary')}",
-        ])
-    if timeline := response.get("timeline"):
-        lines = [
-            f"{item['event_sequence']}. {item['event_type']} — {item['summary']}"
-            for item in timeline
-        ]
-        return "\n".join(lines) or "No history."
-    return "No response payload available."
 
 
 def _approver_keyboard(request_id: str) -> InlineKeyboardMarkup:
@@ -62,57 +41,16 @@ def _approver_keyboard(request_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
-_MAX_MSG_LEN = 4096
-
-_HELP_TEXT = (
-    "<b>🤖 Marker Checker</b> — Change Request Approval Agent\n\n"
-    "Send a message in plain text (Vietnamese or English) to create a request. "
-    "The agent will parse it and ask you to confirm before submitting.\n\n"
-    "<b>Example messages:</b>\n"
-    "• <code>enable feature-X on api-gateway, ask @john to approve</code>\n"
-    "• <code>tắt tính năng beta trên nginx, nhờ @manager duyệt</code>\n"
-    "• <code>change timeout from 30s to 60s for nginx-config, @ops should review</code>\n\n"
-    "─────────────────────────────\n"
-    "<b>Requester commands</b>\n\n"
-    "/confirm — Confirm and submit the pending draft\n"
-    "/discard — Cancel the pending draft without submitting\n"
-    "/resubmit <code>REQ-XXXX &lt;new message&gt;</code> — Revise and resubmit after Need Info\n"
-    "/mypending — List your active requests\n"
-    "/status <code>REQ-XXXX</code> — View current status and details\n"
-    "/history <code>REQ-XXXX</code> — View the full event timeline\n"
-    "/search <code>&lt;query&gt;</code> — Search requests by target name\n\n"
-    "─────────────────────────────\n"
-    "<b>Approver commands</b>\n\n"
-    "/myapprovals — List requests waiting for your approval\n"
-    "/approve <code>REQ-XXXX [note]</code> — Approve a request\n"
-    "/reject <code>REQ-XXXX [reason]</code> — Reject a request\n"
-    "/needinfo <code>REQ-XXXX [question]</code> — Ask requester for more information\n"
-    "/cancel <code>REQ-XXXX [note]</code> — Cancel a request\n\n"
-    "─────────────────────────────\n"
-    "<b>Workflow</b>\n\n"
-    "1. Requester sends a change description → agent drafts a request\n"
-    "2. Requester sends /confirm → submitted, approver notified\n"
-    "3. Approver taps inline buttons or uses /approve, /reject, /needinfo\n"
-    "4. Requester is notified of the decision\n"
-    "5. If needinfo: requester uses /resubmit to revise and resubmit"
-)
-
-
-def _user_name(update: Update) -> str | None:
-    user = update.effective_user
-    return user.full_name if user else None
-
-
-class TelegramAdapter:
+class TelegramAdapter(TelegramCommandsMixin):
     def __init__(
         self,
         *,
         config: TelegramConfig,
-        orchestrator: AgentOrchestrator,
+        orchestrator: RequestCoordinator,
     ) -> None:
         self._config = config
         self._orchestrator = orchestrator
-        self._application: Application | None = None
+        self._application: BotApplication | None = None
         self._polling_thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         # Maps @handle / telegram:<id> → Telegram chat_id string.
@@ -140,7 +78,7 @@ class TelegramAdapter:
         self._polling_thread.start()
         LOGGER.info("Telegram polling thread started.")
 
-    def notify_approver(self, payload: dict[str, Any]) -> None:
+    def notify_approver(self, payload: RequestSummary) -> None:
         approver_handle = payload.get("approver_handle", "")
         with self._registry_lock:
             chat_id = self._chat_registry.get(approver_handle)
@@ -163,27 +101,37 @@ class TelegramAdapter:
     def notify_requester(self, origin_channel_id: str, message: str) -> None:
         self._send_message(origin_channel_id, message)
 
+    def stop(self) -> None:
+        app = self._application
+        if app is not None:
+            app.stop_running()
+        thread = self._polling_thread
+        if thread is not None:
+            thread.join(timeout=10)
+
     def _send_message(
         self,
         chat_id: str,
         text: str,
         reply_markup: InlineKeyboardMarkup | None = None,
     ) -> None:
-        if not self._application or not self._loop or not self._loop.is_running():
+        # Capture to locals to avoid TOCTOU: another thread could set these to None
+        # between the None-check and the coroutine submission.
+        loop = self._loop
+        app = self._application
+        if app is None or loop is None or not loop.is_running():
             LOGGER.info("_send_message: event loop not available, message not sent to %s", chat_id)
             return
         future = asyncio.run_coroutine_threadsafe(
-            self._application.bot.send_message(
-                chat_id=chat_id, text=text, reply_markup=reply_markup
-            ),
-            self._loop,
+            app.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup),
+            loop,
         )
         future.add_done_callback(
             lambda f: LOGGER.warning("_send_message failed chat_id=%s error=%s", chat_id, f.exception())
             if f.exception() else None
         )
 
-    def _build_application(self, bot_token: str) -> Application:
+    def _build_application(self, bot_token: str) -> BotApplication:
         application = (
             ApplicationBuilder()
             .token(bot_token)
@@ -235,7 +183,7 @@ class TelegramAdapter:
                 asyncio.set_event_loop(None)
                 loop.close()
 
-    async def _post_init(self, application: Application) -> None:
+    async def _post_init(self, application: BotApplication) -> None:
         await application.bot.set_my_commands([
             BotCommand("start", "Show usage guide"),
             BotCommand("help", "Show usage guide"),
@@ -252,212 +200,3 @@ class TelegramAdapter:
             BotCommand("history", "View request event timeline"),
             BotCommand("search", "Search requests by target name"),
         ])
-
-    # --- command handlers ---
-
-    async def _help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        await update.effective_message.reply_text(_HELP_TEXT, parse_mode="HTML")
-
-    async def _confirm_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        await update.effective_message.chat.send_action(ChatAction.TYPING)
-        response = await asyncio.to_thread(
-            self._orchestrator.handle_requester_message,
-            text="/confirm",
-            requester_name=_user_name(update),
-            requester_handle=self._user_handle(update),
-            source=self._source_from_update(update),
-        )
-        await self._reply(update, response)
-
-    async def _discard_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        response = self._orchestrator.discard_draft(self._user_handle(update))
-        await self._reply(update, response)
-
-    async def _resubmit_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        if not context.args or len(context.args) < 2:
-            await update.effective_message.reply_text(
-                "Usage: /resubmit REQ-XXXX <updated request message>"
-            )
-            return
-        request_id = context.args[0]
-        text = " ".join(context.args[1:])
-        await update.effective_message.chat.send_action(ChatAction.TYPING)
-        response = await asyncio.to_thread(
-            self._orchestrator.handle_resubmission,
-            request_id=request_id,
-            text=text,
-            actor_name=_user_name(update),
-            actor_handle=self._user_handle(update),
-            source=self._source_from_update(update),
-        )
-        await self._reply(update, response)
-
-    async def _mypending_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        response = await asyncio.to_thread(
-            self._orchestrator.list_requester_pending, self._user_handle(update)
-        )
-        await self._reply(update, response)
-
-    async def _myapprovals_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        response = await asyncio.to_thread(
-            self._orchestrator.list_pending_approvals, self._user_handle(update)
-        )
-        await self._reply(update, response)
-
-    async def _approve_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action=Operation.APPROVE)
-
-    async def _reject_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action=Operation.REJECT)
-
-    async def _needinfo_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action=Operation.NEEDINFO)
-
-    async def _cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._handle_action_command(update, context, action=Operation.CANCEL)
-
-    async def _status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        if not context.args:
-            await update.effective_message.reply_text("Usage: /status REQ-XXXX")
-            return
-        response = await asyncio.to_thread(
-            self._orchestrator.lookup_request,
-            request_id=context.args[0],
-            actor_handle=self._user_handle(update),
-        )
-        await self._reply(update, response)
-
-    async def _history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        if not context.args:
-            await update.effective_message.reply_text("Usage: /history REQ-XXXX")
-            return
-        response = await asyncio.to_thread(self._orchestrator.get_history, context.args[0])
-        await self._reply(update, response)
-
-    async def _search_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        if not context.args:
-            await update.effective_message.reply_text("Usage: /search <target name>")
-            return
-        query = " ".join(context.args)
-        response = await asyncio.to_thread(self._orchestrator.search_by_target, query)
-        await self._reply(update, response)
-
-    async def _text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self._register_user(update)
-        await update.effective_message.chat.send_action(ChatAction.TYPING)
-        text = update.effective_message.text if update.effective_message else ""
-        response = await asyncio.to_thread(
-            self._orchestrator.handle_requester_message,
-            text=text,
-            requester_name=_user_name(update),
-            requester_handle=self._user_handle(update),
-            source=self._source_from_update(update),
-        )
-        await self._reply(update, response)
-
-    async def _handle_action_command(
-        self,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        *,
-        action: Operation,
-    ) -> None:
-        self._register_user(update)
-        if not context.args:
-            await update.effective_message.reply_text(
-                f"Usage: /{action} REQ-XXXX [optional note]"
-            )
-            return
-        request_id = context.args[0]
-        note = " ".join(context.args[1:]).strip()
-        await update.effective_message.chat.send_action(ChatAction.TYPING)
-        response = await asyncio.to_thread(
-            self._orchestrator.handle_approver_action,
-            action=action,
-            request_id=request_id,
-            actor_name=_user_name(update),
-            actor_handle=self._user_handle(update),
-            note=note,
-            source=self._source_from_update(update),
-        )
-        await self._reply(update, response)
-
-    async def _handle_callback_query(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        query = update.callback_query
-        await query.answer()
-        self._register_user(update)
-
-        parts = query.data.split(":", 1)
-        if len(parts) != 2:
-            await query.edit_message_text("Invalid action data.")
-            return
-        action_str, request_id = parts
-        try:
-            action = Operation(action_str)
-        except ValueError:
-            await query.edit_message_text("Unknown action.")
-            return
-
-        response = await asyncio.to_thread(
-            self._orchestrator.handle_approver_action,
-            action=action,
-            request_id=request_id,
-            actor_name=_user_name(update),
-            actor_handle=self._user_handle(update),
-            note="",
-            source=self._source_from_update(update),
-        )
-        text = _format_response_text(response)
-        if len(text) > _MAX_MSG_LEN:
-            text = text[: _MAX_MSG_LEN - 6] + "\n[…]"
-        await query.edit_message_text(text=text, reply_markup=None)
-
-    async def _reply(self, update: Update, response: dict) -> None:
-        text = _format_response_text(response)
-        if len(text) > _MAX_MSG_LEN:
-            text = text[: _MAX_MSG_LEN - 6] + "\n[…]"
-        await update.effective_message.reply_text(text)
-
-    # --- private helpers ---
-
-    def _register_user(self, update: Update) -> None:
-        user = update.effective_user
-        chat = update.effective_chat
-        if not user or not chat:
-            return
-        chat_id = str(chat.id)
-        with self._registry_lock:
-            if user.username:
-                self._chat_registry[f"@{user.username}"] = chat_id
-            self._chat_registry[f"telegram:{user.id}"] = chat_id
-
-    def _source_from_update(self, update: Update) -> MessageSource:
-        chat_id = str(update.effective_chat.id) if update.effective_chat else None
-        message_id = (
-            str(update.effective_message.message_id) if update.effective_message else None
-        )
-        return MessageSource(
-            source_channel="telegram",
-            channel_id=chat_id,
-            thread_id=chat_id,
-            source_message_id=message_id,
-        )
-
-    def _user_handle(self, update: Update) -> str:
-        user = update.effective_user
-        if user is None:
-            return "unknown-user"
-        if user.username:
-            return f"@{user.username}"
-        return f"telegram:{user.id}"

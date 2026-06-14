@@ -4,21 +4,15 @@ import base64
 import json
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
 from uuid import uuid4
 
-from cachetools import TTLCache
-
 import gspread
+from cachetools import TTLCache
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
-from gspread.utils import rowcol_to_a1
+from gspread.utils import ValueInputOption, rowcol_to_a1
 
-from marker_checker_agent.config import GoogleSheetsConfig
-from marker_checker_agent.domain.models import (
-    AuditEventRecord,
-    RequestConversationRecord,
-    RequestRecord,
-)
 from marker_checker_agent.persistence.google_sheets_mapper import (
     AUDIT_HEADERS,
     CONVERSATION_HEADERS,
@@ -30,9 +24,17 @@ from marker_checker_agent.persistence.google_sheets_mapper import (
     request_to_row,
 )
 
+if TYPE_CHECKING:
+    from marker_checker_agent.config import GoogleSheetsConfig
+    from marker_checker_agent.domain.models import (
+        AuditEventRecord,
+        RequestConversationRecord,
+        RequestRecord,
+    )
+
 
 class GoogleSheetsWorkflowStore:
-    _SCOPES = [
+    _SCOPES: ClassVar[list[str]] = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
@@ -71,7 +73,7 @@ class GoogleSheetsWorkflowStore:
     def create_request(self, request: RequestRecord) -> RequestRecord:
         with self._lock:
             worksheet = self._requests_worksheet()
-            worksheet.append_row(request_to_row(request), value_input_option="RAW")
+            worksheet.append_row(request_to_row(request), value_input_option=ValueInputOption.raw)
             self._sheet_cache.pop(worksheet.title, None)
         return request
 
@@ -83,10 +85,7 @@ class GoogleSheetsWorkflowStore:
                 raise LookupError(f"Request {request.request_id} was not found")
 
             end_cell = rowcol_to_a1(row_number, len(REQUEST_HEADERS))
-            worksheet.update(
-                f"A{row_number}:{end_cell}",
-                [request_to_row(request)],
-            )
+            worksheet.update([request_to_row(request)], f"A{row_number}:{end_cell}")
             self._sheet_cache.pop(worksheet.title, None)
         return request
 
@@ -112,7 +111,7 @@ class GoogleSheetsWorkflowStore:
             worksheet = self._conversations_worksheet()
             worksheet.append_row(
                 conversation_to_row(conversation),
-                value_input_option="RAW",
+                value_input_option=ValueInputOption.raw,
             )
             self._sheet_cache.pop(worksheet.title, None)
         return conversation
@@ -126,7 +125,7 @@ class GoogleSheetsWorkflowStore:
             if event.event_sequence <= 0:
                 event.event_sequence = self._next_event_sequence_locked(event.request_id)
 
-            worksheet.append_row(audit_to_row(event), value_input_option="RAW")
+            worksheet.append_row(audit_to_row(event), value_input_option=ValueInputOption.raw)
             self._sheet_cache.pop(worksheet.title, None)
         return event
 
@@ -148,7 +147,7 @@ class GoogleSheetsWorkflowStore:
                 self._config.service_account_json_base64.encode("utf-8")
             )
             info = json.loads(decoded.decode("utf-8"))
-            credentials = Credentials.from_service_account_info(
+            credentials = Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
                 info,
                 scopes=self._SCOPES,
             )
@@ -156,7 +155,7 @@ class GoogleSheetsWorkflowStore:
 
         if self._config.service_account_file:
             service_account_path = Path(self._config.service_account_file).expanduser()
-            credentials = Credentials.from_service_account_file(
+            credentials = Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
                 service_account_path,
                 scopes=self._SCOPES,
             )
@@ -213,12 +212,12 @@ class GoogleSheetsWorkflowStore:
 
         values = worksheet.get_all_values()
         if not values:
-            worksheet.append_row(headers, value_input_option="RAW")
+            worksheet.append_row(headers, value_input_option=ValueInputOption.raw)
             return worksheet
 
         if values[0] != headers:
             end_cell = rowcol_to_a1(1, len(headers))
-            worksheet.update(f"A1:{end_cell}", [headers])
+            worksheet.update([headers], f"A1:{end_cell}")
 
         return worksheet
 

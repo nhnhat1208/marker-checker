@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from marker_checker_agent.config import RuntimeConfig
-
-from .base import WorkflowStore
-
 if TYPE_CHECKING:
-    from .google_sheets import GoogleSheetsWorkflowStore
+    from marker_checker_agent.config import RuntimeConfig
+
+    from .base import WorkflowStore
 
 
 def build_workflow_store(config: RuntimeConfig) -> WorkflowStore:

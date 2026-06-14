@@ -17,5 +17,4 @@ The docs are intentionally small and grouped into three areas.
 
 ## Delivery
 
-- [Implementation Plan](./delivery-plan/implementation-plan.md)
-- [AgentBase Native Migration](./delivery-plan/agentbase-native-migration.md) — phased migration plan: session state → webhook → async LLM → Identity Service
+- [Roadmap](./delivery-plan/roadmap.md) — Phase 0 (done) + AgentBase-native migration plan: session state → webhook → async LLM → Identity Service

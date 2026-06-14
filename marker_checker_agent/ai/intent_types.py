@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.parsing.request_parser import ParsedRequest
+
+if TYPE_CHECKING:
+    from marker_checker_agent.parsing.request_parser import ParsedRequest
 
 MANAGEMENT_OPERATIONS: frozenset[Operation] = frozenset({
     Operation.LOOKUP,

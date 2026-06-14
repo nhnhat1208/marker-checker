@@ -3,13 +3,15 @@ from __future__ import annotations
 import unittest
 from uuid import uuid4
 
-from marker_checker_agent.config import RuntimeConfig
+from marker_checker_agent.config import AppConfig, RuntimeConfig
 from marker_checker_agent.domain.models import (
     AuditEventRecord,
+    MessageSource,
     RequestConversationRecord,
     RequestRecord,
+    RequestSummary,
 )
-from marker_checker_agent.orchestrator import AgentOrchestrator, MessageSource
+from marker_checker_agent.request_coordinator import RequestCoordinator
 from marker_checker_agent.services.audit_service import AuditService
 from marker_checker_agent.services.request_service import RequestService
 
@@ -64,17 +66,17 @@ class WorkflowTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.store = InMemoryWorkflowStore()
         self.audit_service = AuditService(self.store)
-        self.config = RuntimeConfig(app={"request_id_prefix": "SMK"})
+        self.config = RuntimeConfig(app=AppConfig(request_id_prefix="SMK"))
         self.request_service = RequestService(
             config=self.config,
             workflow_store=self.store,
             audit_service=self.audit_service,
         )
-        self.orchestrator = AgentOrchestrator(
+        self.orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
         )
-        self.notifications: list[dict] = []
+        self.notifications: list[RequestSummary] = []
         self.orchestrator.set_approver_notification_callback(self.notifications.append)
         self.source = MessageSource(
             source_channel="test",

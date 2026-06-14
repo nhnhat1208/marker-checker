@@ -76,9 +76,8 @@ class ConfigOverridesTest(unittest.TestCase):
         self.assertEqual(config.ai.presence_penalty, 0.1)
 
     def test_missing_runtime_files_fail_fast(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(FileNotFoundError):
-                load_runtime_config(Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir, self.assertRaises(FileNotFoundError):
+            load_runtime_config(Path(temp_dir))
 
     def test_missing_required_values_raise_clear_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

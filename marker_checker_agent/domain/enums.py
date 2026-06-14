@@ -42,6 +42,21 @@ class Operation(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ActorKind(StrEnum):
+    USER = "user"
+    SYSTEM = "system"
+    REQUESTER = "requester"
+    APPROVER = "approver"
+    AGENT = "agent"
+    LOOKUP_USER = "lookup_user"
+
+
+class ConversationRole(StrEnum):
+    REQUESTER_FOLLOWUP = "requester_followup"
+    APPROVER_REVIEW = "approver_review"
+    NONE = ""
+
+
 class ResponseStatus(StrEnum):
     OK = "ok"
     ERROR = "error"

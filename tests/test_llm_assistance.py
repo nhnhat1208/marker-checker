@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from marker_checker_agent.ai import AssistedParseResult, IntentNewRequest
+from marker_checker_agent.ai.intent_types import AssistedParseResult, IntentNewRequest
 from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.orchestrator import AgentOrchestrator
+from marker_checker_agent.domain.models import ActorContext, WorkflowAction
 from marker_checker_agent.parsing.request_parser import ParsedRequest
+from marker_checker_agent.request_coordinator import RequestCoordinator
 from tests.workflow_test_support import WorkflowTestCase
 
 
@@ -51,7 +52,7 @@ class LlmAssistanceTest(WorkflowTestCase):
             def generate_action_result_message(self, *, action_result: str) -> str | None:
                 return None
 
-        assisted_orchestrator = AgentOrchestrator(
+        assisted_orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=FakeInputAssistant(),
@@ -59,8 +60,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
         draft_response = assisted_orchestrator.handle_requester_message(
             text="please enable sample-object and ask checker to approve it",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(draft_response["status"], "confirmation_required")
@@ -105,7 +105,7 @@ class LlmAssistanceTest(WorkflowTestCase):
             def generate_action_result_message(self, *, action_result: str) -> str | None:
                 return None
 
-        assisted_orchestrator = AgentOrchestrator(
+        assisted_orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=FakeInputAssistant(),
@@ -113,8 +113,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
         draft_response = assisted_orchestrator.handle_requester_message(
             text="please enable sample-object and ask checker to approve it",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(draft_response["draft"]["approver_handle"], "@checker")
@@ -161,7 +160,7 @@ class LlmAssistanceTest(WorkflowTestCase):
             def generate_action_result_message(self, *, action_result: str) -> str | None:
                 return None
 
-        assisted_orchestrator = AgentOrchestrator(
+        assisted_orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=FakeInputAssistant(),
@@ -169,8 +168,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
         draft_response = assisted_orchestrator.handle_requester_message(
             text="please enable sample-object and ask checker to approve it",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(
@@ -226,7 +224,7 @@ class LlmAssistanceTest(WorkflowTestCase):
             def generate_action_result_message(self, *, action_result: str) -> str | None:
                 return None
 
-        assisted_orchestrator = AgentOrchestrator(
+        assisted_orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=FakeInputAssistant(),
@@ -234,8 +232,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
         response = assisted_orchestrator.handle_requester_message(
             text="please enable sample-object and ask checker to approve it",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         self.assertEqual(response["status"], "missing_fields")
@@ -282,7 +279,7 @@ class LlmAssistanceTest(WorkflowTestCase):
             def generate_action_result_message(self, *, action_result: str) -> str | None:
                 return "Checker approved the request for sample-object."
 
-        assisted_orchestrator = AgentOrchestrator(
+        assisted_orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=FakeInputAssistant(),
@@ -290,24 +287,19 @@ class LlmAssistanceTest(WorkflowTestCase):
 
         assisted_orchestrator.handle_requester_message(
             text="please enable sample-object and ask checker to approve it",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         submit_response = assisted_orchestrator.handle_requester_message(
             text="/confirm",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         request_id = submit_response["request"]["request_id"]
 
         assisted_orchestrator.handle_approver_action(
-            action="approve",
-            request_id=request_id,
-            actor_name="Checker One",
-            actor_handle="@checker",
-            note="looks good",
+            actor=ActorContext(name="Checker One", handle="@checker"),
+            action=WorkflowAction(action=Operation.APPROVE, request_id=request_id, note="looks good"),
             source=self.source,
         )
 
@@ -364,7 +356,7 @@ class LlmAssistanceTest(WorkflowTestCase):
             def generate_action_result_message(self, *, action_result: str) -> str | None:
                 return "Checker approved the request for sample-object."
 
-        assisted_orchestrator = AgentOrchestrator(
+        assisted_orchestrator = RequestCoordinator(
             request_service=self.request_service,
             audit_service=self.audit_service,
             input_assistant=FakeInputAssistant(),
@@ -372,24 +364,19 @@ class LlmAssistanceTest(WorkflowTestCase):
 
         assisted_orchestrator.handle_requester_message(
             text="please enable sample-object and ask checker to approve it",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         submit_response = assisted_orchestrator.handle_requester_message(
             text="/confirm",
-            requester_name="Requester One",
-            requester_handle="@requester",
+            requester=ActorContext(name="Requester One", handle="@requester"),
             source=self.source,
         )
         request_id = submit_response["request"]["request_id"]
 
         approve_response = assisted_orchestrator.handle_approver_action(
-            action="approve",
-            request_id=request_id,
-            actor_name="Checker One",
-            actor_handle="@checker",
-            note="looks good",
+            actor=ActorContext(name="Checker One", handle="@checker"),
+            action=WorkflowAction(action=Operation.APPROVE, request_id=request_id, note="looks good"),
             source=self.source,
         )
         self.assertEqual(

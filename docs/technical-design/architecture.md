@@ -18,7 +18,7 @@ The first release only needs:
 flowchart LR
     A[Telegram User or API Caller] --> B[Agent Runtime]
     B --> C[Telegram Adapter / API Entrypoint]
-    C --> D[Agent Orchestrator]
+    C --> D[RequestCoordinator]
     D --> E[Request Service]
     D --> F[Audit Service]
     D -. optional .-> G[LLM Assistance]
@@ -37,7 +37,8 @@ This layer only receives messages and sends responses.
 
 ### Workflow Layer
 
-- `AgentOrchestrator`
+- `RequestCoordinator`
+- `DraftManager`
 - `RequestService`
 - `AuditService`
 
@@ -68,7 +69,8 @@ This layer hides storage details from workflow code.
 | Component | Responsibility |
 | --- | --- |
 | `TelegramAdapter` | Telegram polling and command handling |
-| `AgentOrchestrator` | route messages and coordinate workflow |
+| `RequestCoordinator` | route messages and coordinate workflow |
+| `DraftManager` | per-user TTL caches for draft, resubmit, and partial state |
 | `RequestService` | create and transition requests |
 | `AuditService` | append and read audit events |
 | `RequestInputAssistant` | optional LLM parsing and response help |
@@ -76,7 +78,7 @@ This layer hides storage details from workflow code.
 
 ## In-Memory State and Caching
 
-The orchestrator keeps session state in bounded TTL caches using `cachetools`:
+Session state is managed by `DraftManager`, a dedicated class that owns three bounded TTL caches using `cachetools`:
 
 | Cache | Purpose | Eviction |
 | --- | --- | --- |
@@ -86,7 +88,7 @@ The orchestrator keeps session state in bounded TTL caches using `cachetools`:
 
 The Telegram adapter keeps a `_chat_registry` (handle → chat_id) as an `LRUCache` (max 4096 entries, no TTL).
 
-All three orchestrator caches share a single `RLock` because TTLCache is not thread-safe.
+All three `DraftManager` caches share a single `threading.Lock` because `TTLCache` is not thread-safe.
 
 The Google Sheets store caches raw worksheet values for 15 seconds per worksheet to avoid redundant API reads. The cache is invalidated immediately after every write.
 

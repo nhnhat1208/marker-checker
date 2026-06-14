@@ -3,8 +3,16 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
+from marker_checker_agent.ai.intent_types import (
+    MANAGEMENT_OPERATIONS,
+    AssistedParseResult,
+    IntentManagement,
+    IntentNewRequest,
+    IntentResult,
+    IntentUnknown,
+)
 from marker_checker_agent.ai.llm_client import LLMClient
 from marker_checker_agent.ai.prompts import (
     INTENT_CLASSIFY_SYSTEM_PROMPT,
@@ -22,18 +30,11 @@ from marker_checker_agent.ai.prompts import (
     build_request_parse_user_prompt,
     build_status_summary_user_prompt,
 )
-from marker_checker_agent.ai.types import (
-    MANAGEMENT_OPERATIONS,
-    AssistedParseResult,
-    IntentManagement,
-    IntentNewRequest,
-    IntentResult,
-    IntentUnknown,
-)
-from marker_checker_agent.config import AIConfig
 from marker_checker_agent.domain.enums import Operation
 from marker_checker_agent.parsing.request_parser import ParsedRequest, list_missing_required_fields
 
+if TYPE_CHECKING:
+    from marker_checker_agent.config import AIConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +42,9 @@ LOGGER = logging.getLogger(__name__)
 class RequestInputAssistant(Protocol):
     def classify_intent(self, text: str) -> IntentResult: ...
     def assist_request_text(self, text: str) -> AssistedParseResult: ...
-    def generate_clarification_message(self, *, original_message: str, missing_fields: list[str], validation_errors: list[str]) -> str | None: ...
+    def generate_clarification_message(
+        self, *, original_message: str, missing_fields: list[str], validation_errors: list[str]
+    ) -> str | None: ...
     def generate_confirmation_message(self, *, parsed_request_summary: str) -> str | None: ...
     def generate_status_summary(self, *, request_summary: str) -> str | None: ...
     def generate_history_summary(self, *, request_history: str) -> str | None: ...
@@ -86,15 +89,13 @@ class OpenAICompatibleInputAssistant:
                 change_to_summary=payload.get("change_to_summary", "").strip(),
                 approver_handle=self._normalize_approver_handle(payload.get("approver_handle", "")),
             )
-            validated, validation_errors = self._validate_parsed_request(raw)
-            if validation_errors:
-                LOGGER.info("classify_intent validation_errors=%s", validation_errors)
+            validated, _ = self._validate_parsed_request(raw)
             return IntentNewRequest(
                 target_label=validated.target_label,
                 change_from_summary=validated.change_from_summary,
                 change_to_summary=validated.change_to_summary,
                 approver_handle=validated.approver_handle,
-                guidance_message=payload.get("guidance_message", "").strip() or None,
+                guidance_message=payload.get("guidance_message", "").strip(),
             )
         return IntentUnknown()
 
@@ -135,19 +136,14 @@ class OpenAICompatibleInputAssistant:
                 missing_fields, validation_errors,
             )
             LOGGER.info(
-                "LLM input assistance incomplete model=%s prompt_version=%s latency_ms=%s missing_fields=%s validation_errors=%s",
+                "LLM input assistance incomplete model=%s prompt_version=%s"
+                " latency_ms=%s missing_fields=%s validation_errors=%s",
                 self._config.model, self._config.prompt_version, latency_ms,
                 ",".join(missing_fields), validation_errors,
             )
-            return AssistedParseResult(
-                parsed_request=parsed,
-                guidance_message=guidance_message,
-                parser_name="llm_assisted",
-                missing_fields=missing_fields,
-                validation_errors=validation_errors,
-                latency_ms=latency_ms,
-                model=self._config.model,
-                prompt_version=self._config.prompt_version,
+            return self._build_assist_result(
+                parsed=parsed, validation_errors=validation_errors,
+                missing_fields=missing_fields, guidance_message=guidance_message, latency_ms=latency_ms,
             )
 
         LOGGER.info(
@@ -155,10 +151,25 @@ class OpenAICompatibleInputAssistant:
             self._config.model, self._config.prompt_version, latency_ms,
             parsed.target_label, parsed.approver_handle,
         )
+        return self._build_assist_result(
+            parsed=parsed, validation_errors=validation_errors,
+            missing_fields=[], guidance_message=None, latency_ms=latency_ms,
+        )
+
+    def _build_assist_result(
+        self,
+        *,
+        parsed: ParsedRequest,
+        validation_errors: list[str],
+        missing_fields: list[str],
+        guidance_message: str | None,
+        latency_ms: int,
+    ) -> AssistedParseResult:
         return AssistedParseResult(
             parsed_request=parsed,
+            guidance_message=guidance_message,
             parser_name="llm_assisted",
-            missing_fields=[],
+            missing_fields=missing_fields,
             validation_errors=validation_errors,
             latency_ms=latency_ms,
             model=self._config.model,

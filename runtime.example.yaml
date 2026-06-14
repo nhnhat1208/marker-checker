@@ -15,7 +15,6 @@ telegram:
   enabled: true
   polling_enabled: true
   bot_token: ""
-  approver_notification_prefix: "Approval request"
 
 google_sheets:
   enabled: true

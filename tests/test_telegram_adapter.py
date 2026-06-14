@@ -33,10 +33,10 @@ class TelegramAdapterTest(unittest.TestCase):
     def test_run_polling_creates_event_loop_for_background_thread(self) -> None:
         adapter = TelegramAdapter(
             config=TelegramConfig(enabled=True, polling_enabled=True, bot_token="token"),
-            orchestrator=DummyOrchestrator(),
+            orchestrator=DummyOrchestrator(),  # type: ignore[arg-type]
         )
         fake_application = FakeApplication()
-        adapter._application = fake_application
+        adapter._application = fake_application  # type: ignore[assignment]
 
         polling_thread = threading.Thread(target=adapter._run_polling)
         polling_thread.start()
@@ -57,7 +57,7 @@ class TelegramAdapterTest(unittest.TestCase):
     def test_start_polling_skips_blank_token(self) -> None:
         adapter = TelegramAdapter(
             config=TelegramConfig(enabled=True, polling_enabled=True, bot_token="   "),
-            orchestrator=DummyOrchestrator(),
+            orchestrator=DummyOrchestrator(),  # type: ignore[arg-type]
         )
 
         with patch.object(adapter, "_build_application") as build_application:

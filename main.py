@@ -1,9 +1,13 @@
+import logging
+
 from greennode_agentbase import GreenNodeAgentBaseApp, PingStatus, RequestContext
 
-from marker_checker_agent.runtime import MarkerCheckerRuntime
+from marker_checker_agent.app import MarkerCheckerApp
+
+logging.basicConfig(level=logging.INFO)
 
 app = GreenNodeAgentBaseApp()
-runtime = MarkerCheckerRuntime()
+runtime = MarkerCheckerApp()
 
 
 @app.entrypoint

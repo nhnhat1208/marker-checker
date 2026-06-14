@@ -1,1 +1,0 @@
-"""Marker checker agent package."""

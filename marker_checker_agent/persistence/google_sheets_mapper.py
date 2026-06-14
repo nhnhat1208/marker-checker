@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import TYPE_CHECKING, Literal, cast
 
 from marker_checker_agent.domain.models import (
     AuditEventRecord,
     RequestConversationRecord,
     RequestRecord,
 )
-from marker_checker_agent.time_utils import utc_now
+from marker_checker_agent.utils.time_utils import utc_now
 
+if TYPE_CHECKING:
+    from marker_checker_agent.domain.enums import ActorKind, AuditEventType, ReviewStatus
 
 REQUEST_HEADERS = [
     "request_id",
@@ -116,7 +119,7 @@ def request_from_row(row: dict[str, str]) -> RequestRecord:
         change_from_summary=row.get("change_from_summary", ""),
         change_to_summary=row.get("change_to_summary", ""),
         business_reason=optional_text(row.get("business_reason")),
-        review_status=row.get("review_status", ""),
+        review_status=cast("ReviewStatus", row.get("review_status", "")),
         current_revision=parse_int(row.get("current_revision")) or 1,
         last_submitted_revision=parse_int(row.get("last_submitted_revision")) or 1,
         last_submitted_at=parse_datetime(row.get("last_submitted_at")) or utc_now(),
@@ -160,15 +163,15 @@ def audit_from_row(row: dict[str, str]) -> AuditEventRecord:
         event_id=row.get("event_id", ""),
         event_sequence=parse_int(row.get("event_sequence")) or 0,
         request_id=row.get("request_id", ""),
-        event_type=row.get("event_type", ""),
+        event_type=cast("AuditEventType", row.get("event_type", "")),
         actor_name=optional_text(row.get("actor_name")),
         actor_handle=row.get("actor_handle", ""),
-        actor_kind=row.get("actor_kind", "user"),
+        actor_kind=cast("ActorKind", row.get("actor_kind", "user")),
         request_revision=parse_int(row.get("request_revision")),
         occurred_at=parse_datetime(row.get("occurred_at")) or utc_now(),
         summary=row.get("summary", ""),
         event_payload=json.loads(payload) if payload else {},
-        source_channel=row.get("source_channel", "telegram"),
+        source_channel=cast("Literal['telegram']", row.get("source_channel", "telegram")),
         thread_id=optional_text(row.get("thread_id")),
         source_message_id=optional_text(row.get("source_message_id")),
     )

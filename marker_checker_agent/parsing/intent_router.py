@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from marker_checker_agent.domain.enums import Operation
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import ClassVar
 
 
 @dataclass(frozen=True)
@@ -50,49 +55,35 @@ class FreeformIntentRouter:
         re.IGNORECASE,
     )
 
+    _MATCHERS: ClassVar[list[tuple[re.Pattern[str], Callable[[re.Match[str]], RoutedIntent]]]] = [
+        (_LOOKUP_PATTERN,
+         lambda m: RoutedIntent(operation=Operation.LOOKUP, request_id=m.group("request_id"))),
+        (_HISTORY_PATTERN,
+         lambda m: RoutedIntent(operation=Operation.HISTORY, request_id=m.group("request_id"))),
+        (_CANCEL_PATTERN,
+         lambda m: RoutedIntent(
+             operation=Operation.CANCEL, request_id=m.group("request_id"),
+             note=(m.group("note") or "").strip(),
+         )),
+        (_NEEDINFO_PATTERN,
+         lambda m: RoutedIntent(
+             operation=Operation.NEEDINFO, request_id=m.group("request_id"),
+             note=(m.group("note") or "").strip(),
+         )),
+        (_RESUBMIT_PATTERN,
+         lambda m: RoutedIntent(
+             operation=Operation.RESUBMIT, request_id=m.group("request_id"),
+             text=m.group("text").strip(),
+         )),
+        (_MY_PENDING_PATTERN,
+         lambda _: RoutedIntent(operation=Operation.MY_PENDING, request_id="")),
+        (_PENDING_APPROVALS_PATTERN,
+         lambda _: RoutedIntent(operation=Operation.PENDING_APPROVALS, request_id="")),
+    ]
+
     def route(self, text: str) -> RoutedIntent | None:
-        lookup_match = self._LOOKUP_PATTERN.match(text)
-        if lookup_match:
-            return RoutedIntent(
-                operation=Operation.LOOKUP,
-                request_id=lookup_match.group("request_id"),
-            )
-
-        history_match = self._HISTORY_PATTERN.match(text)
-        if history_match:
-            return RoutedIntent(
-                operation=Operation.HISTORY,
-                request_id=history_match.group("request_id"),
-            )
-
-        cancel_match = self._CANCEL_PATTERN.match(text)
-        if cancel_match:
-            return RoutedIntent(
-                operation=Operation.CANCEL,
-                request_id=cancel_match.group("request_id"),
-                note=(cancel_match.group("note") or "").strip(),
-            )
-
-        needinfo_match = self._NEEDINFO_PATTERN.match(text)
-        if needinfo_match:
-            return RoutedIntent(
-                operation=Operation.NEEDINFO,
-                request_id=needinfo_match.group("request_id"),
-                note=(needinfo_match.group("note") or "").strip(),
-            )
-
-        resubmit_match = self._RESUBMIT_PATTERN.match(text)
-        if resubmit_match:
-            return RoutedIntent(
-                operation=Operation.RESUBMIT,
-                request_id=resubmit_match.group("request_id"),
-                text=resubmit_match.group("text").strip(),
-            )
-
-        if self._MY_PENDING_PATTERN.match(text):
-            return RoutedIntent(operation=Operation.MY_PENDING, request_id="")
-
-        if self._PENDING_APPROVALS_PATTERN.match(text):
-            return RoutedIntent(operation=Operation.PENDING_APPROVALS, request_id="")
-
+        for pattern, builder in self._MATCHERS:
+            m = pattern.match(text)
+            if m:
+                return builder(m)
         return None

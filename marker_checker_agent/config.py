@@ -44,7 +44,6 @@ class TelegramConfig(_EnvFirstSettings):
     enabled: bool = True
     polling_enabled: bool = True
     bot_token: str = ""
-    approver_notification_prefix: str = "Approval request"
 
 
 class GoogleSheetsWorksheetConfig(BaseModel):

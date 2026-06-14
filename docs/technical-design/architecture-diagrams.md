@@ -22,7 +22,8 @@ graph TB
         end
 
         subgraph runtime["MarkerCheckerRuntime"]
-            ORCH["AgentOrchestrator\n\n_pending_drafts TTLCache\n_pending_resubmit TTLCache\n_partial_drafts TTLCache\n_draft_lock (threading.Lock)"]
+            ORCH["RequestCoordinator"]
+            DM["DraftManager\n\n_pending_drafts TTLCache\n_pending_resubmit TTLCache\n_partial_drafts TTLCache\n_lock (threading.Lock)"]
             RS["RequestService\nAuditService"]
             AI["RequestInputAssistant"]
         end
@@ -40,6 +41,7 @@ graph TB
     ORCH -->|"callback via\nasyncio.run_coroutine_threadsafe"| LOOP
     LOOP --> PTB
     PTB -->|"asyncio.to_thread()"| ORCH
+    ORCH --> DM
     ORCH --> RS
     RS -->|"gspread sync"| GS
     ORCH --> AI
@@ -68,12 +70,12 @@ sequenceDiagram
     LOOP->>TP: asyncio.to_thread(orchestrator.handle_requester_message)
     Note over LOOP,TP: Polling loop is freed while orchestrator runs
     TP->>ORCH: handle_requester_message(text, handle)
-    ORCH->>ORCH: read _pending_resubmit TTLCache
+    ORCH->>ORCH: draft_manager.pop_resubmit(handle)
     ORCH->>LLM: classify_intent(text) [httpx sync]
     LLM-->>ORCH: IntentNewRequest
     ORCH->>LLM: assist_request_text(text) [httpx sync]
     LLM-->>ORCH: AssistedParseResult
-    ORCH->>ORCH: write _pending_drafts TTLCache
+    ORCH->>ORCH: draft_manager.set_draft(handle, draft)
     ORCH-->>TP: {status: CONFIRMATION_REQUIRED, message: ...}
     TP-->>LOOP: result dict
     LOOP->>TGAPI: reply_text("Here is your draft...")
@@ -95,11 +97,11 @@ sequenceDiagram
     U->>TGAPI: /confirm
     TGAPI-->>LOOP: update
     LOOP->>TP: asyncio.to_thread(orchestrator.handle_requester_message, "/confirm")
-    TP->>ORCH: _confirm_pending_draft()
-    ORCH->>ORCH: pop _pending_drafts TTLCache
+    TP->>ORCH: handle_requester_message("/confirm")
+    ORCH->>ORCH: draft_manager.pop_draft(handle)
     ORCH->>GS: create_request() [gspread sync]
     GS-->>ORCH: RequestRecord
-    ORCH->>ORCH: _notify_approver(payload)
+    ORCH->>ORCH: notifier.notify_approver(payload)
     Note over ORCH: Still in thread pool worker —<br/>cannot await bot.send_message directly
     ORCH->>LOOP: asyncio.run_coroutine_threadsafe(bot.send_message, loop)
     Note over ORCH,LOOP: Cross-thread bridge back into polling loop
@@ -132,7 +134,7 @@ graph TB
         end
 
         subgraph runtime["MarkerCheckerRuntime"]
-            ORCH["AgentOrchestrator\n\n(no in-memory state)\n(no locks)"]
+            ORCH["RequestCoordinator\n\n(no in-memory state)\n(no locks)"]
             RS["RequestService\nAuditService"]
             AI["RequestInputAssistant"]
             MC["MemoryClient"]

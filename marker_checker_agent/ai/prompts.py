@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+REQUEST_PARSE_PROMPT_VERSION = "request-parse-v1"
 
 REQUEST_PARSE_SYSTEM_PROMPT = """
 Extract a marker-checker approval request into JSON only.

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 import httpx
 
-from marker_checker_agent.config import AIConfig
+if TYPE_CHECKING:
+    from marker_checker_agent.config import AIConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class LLMClient:
                 f"LLM returned empty content (finish_reason={finish_reason!r}). "
                 "The model may have run out of tokens during reasoning — increase max_tokens."
             )
-        return content
+        return str(content)
 
     def complete_json(self, *, system_prompt: str, user_prompt: str, max_tokens: int) -> dict[str, str]:
         content = self.complete_text(
