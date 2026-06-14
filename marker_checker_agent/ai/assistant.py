@@ -86,13 +86,15 @@ class OpenAICompatibleInputAssistant:
                 change_to_summary=payload.get("change_to_summary", "").strip(),
                 approver_handle=self._normalize_approver_handle(payload.get("approver_handle", "")),
             )
-            validated, _ = self._validate_parsed_request(raw)
+            validated, validation_errors = self._validate_parsed_request(raw)
+            if validation_errors:
+                LOGGER.info("classify_intent validation_errors=%s", validation_errors)
             return IntentNewRequest(
                 target_label=validated.target_label,
                 change_from_summary=validated.change_from_summary,
                 change_to_summary=validated.change_to_summary,
                 approver_handle=validated.approver_handle,
-                guidance_message=payload.get("guidance_message", "").strip(),
+                guidance_message=payload.get("guidance_message", "").strip() or None,
             )
         return IntentUnknown()
 

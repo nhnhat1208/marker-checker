@@ -221,10 +221,8 @@ class AgentOrchestrator:
         if not list_missing_required_fields(pre_parsed):
             return pre_parsed, AssistedParseResult(
                 parsed_request=pre_parsed,
-                guidance_message=intent.guidance_message or None,
+                guidance_message=intent.guidance_message,
                 parser_name="llm_assisted",
-                missing_fields=[],
-                validation_errors=[],
             )
         assisted = self._input_assistant.assist_request_text(text)
         return assisted.parsed_request, assisted
@@ -249,7 +247,7 @@ class AgentOrchestrator:
                 self._input_assistant.generate_clarification_message(
                     original_message=text,
                     missing_fields=missing_fields,
-                    validation_errors=assisted_result.validation_errors or [] if assisted_result else [],
+                    validation_errors=assisted_result.validation_errors if assisted_result else [],
                 )
                 if self._input_assistant
                 else None
@@ -698,7 +696,7 @@ def _assistant_metadata(result: AssistedParseResult | None) -> dict[str, Any] | 
         "model": result.model,
         "prompt_version": result.prompt_version,
         "latency_ms": result.latency_ms,
-        "validation_errors": result.validation_errors or [],
+        "validation_errors": result.validation_errors,
     }
 
 

@@ -8,7 +8,7 @@ from marker_checker_agent.persistence.base import WorkflowStore
 
 
 class AuditService:
-    def __init__(self, workflow_store: WorkflowStore):
+    def __init__(self, workflow_store: WorkflowStore) -> None:
         self._workflow_store = workflow_store
 
     def record_event(
