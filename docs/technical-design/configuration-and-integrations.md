@@ -2,109 +2,80 @@
 
 ## Configuration Pattern
 
-Use:
+| File | Purpose | Committed |
+| --- | --- | --- |
+| `runtime.yaml` | Local app config (secrets + settings) | No — gitignored |
+| `runtime.example.yaml` | Template for `runtime.yaml` | Yes |
+| `deploy.env` | Env vars for AgentBase deployment | No — gitignored |
+| `deploy.example.env` | Template for `deploy.env` | Yes |
+| `.greennode.json` | AgentBase IAM credentials | No — gitignored |
+| `.greennode.example.json` | Template for `.greennode.json` | Yes |
 
-- `runtime.yaml` for local config
-- `runtime.example.yaml` as the committed template
-- `.agentbase/deploy.env` for deploy-time overrides
+The application loads YAML first, then applies environment variable overrides. Env vars set to empty strings are ignored (`env_ignore_empty=True`) — this prevents the platform from crashing startup when it injects blank env vars for removed keys during rolling deploys.
 
-The application loads YAML first, then applies environment variable overrides.
-
-## Main Config Areas
+## Config Areas
 
 ### App
 
-- app name
-- log level
-- request ID prefix
+- app name, log level, request ID prefix
 
 ### Workflow
 
-- require confirmation
+- require confirmation before submit
 - require rejection reason
 - exact lookup behavior
 
-### Telegram Config
-
-- enabled
-- polling enabled
-- bot token
-
-### Google Sheets Config
-
-- enabled
-- spreadsheet ID
-- service account file or base64 JSON
-- worksheet names
-
-### AI
-
-- enabled
-- model
-- base URL
-- API key
-- token and timeout tuning
-
-## Main Integrations
-
 ### Telegram
 
-Used for:
-
-- request intake
-- approval actions
-- status and history lookup
+- `enabled` — disable adapter entirely
+- `polling_enabled` — disable polling (set to `false` for webhook mode)
+- `bot_token`
 
 ### Google Sheets
 
-Used for:
+- `enabled`
+- `spreadsheet_id`
+- `service_account_file` or `service_account_json_base64` (mutually exclusive)
+- worksheet names, auto-create flag
 
-- requests
-- audit events
-- request conversation links
+### AI
 
-### LLM Provider
+- `enabled` — the workflow works without AI
+- `model`, `base_url`, `api_key`
+- `max_tokens`, `timeout_seconds`, `temperature`, `top_p`, `presence_penalty`
 
-Optional.
+## Integrations
 
-Used for:
+### Telegram Integration
 
-- request parsing help
-- clarification and summary wording
+Request intake, approval actions, status and history lookup. Uses python-telegram-bot v21+ with long polling. During rolling deploys, a 409 Conflict is handled with automatic retry (up to 3 minutes) until the previous container is terminated.
 
-The workflow still works without AI.
+### Google Sheets Integration
+
+Persists requests, audit events, and conversation links across three worksheets. The store caches worksheet values for 15 seconds and invalidates on every write. One replica is the recommended configuration — Sheets is not suited for high concurrent write volume.
+
+### LLM Integration
+
+Optional. Used for request parsing, clarification wording, and status summaries. The workflow falls back to rule-based parsing if AI is disabled or unavailable. Uses `httpx.Client` with a persistent connection pool.
 
 ## Container and Deployment
 
-The `Dockerfile` uses `uv` (not pip) for dependency installation:
+Built with `uv sync --frozen --no-dev` for reproducible installs. Dependencies install in a separate layer — rebuilds only re-install when `pyproject.toml` or `uv.lock` change. `uv.lock` must not be in `.dockerignore`.
 
-- `uv sync --frozen --no-dev` pins exact versions from `uv.lock`
-- Dependencies are installed in a separate layer before source copy — rebuilds only re-install when `pyproject.toml` or `uv.lock` change
-- `PYTHONUNBUFFERED=1` ensures logs flush immediately to container stdout
-
-Deploy target is GreenNode AgentBase Runtime (Custom Agent). The runtime auto-injects `GREENNODE_CLIENT_ID`, `GREENNODE_CLIENT_SECRET`, `GREENNODE_AGENT_IDENTITY`, `GREENNODE_ENDPOINT_URL` — do not set these in the env file.
-
-The `uv.lock` file must not be in `.dockerignore` — it is required for reproducible builds.
+Deploy target: GreenNode AgentBase Runtime (Custom Agent), `linux/amd64`. The runtime auto-injects `GREENNODE_CLIENT_ID`, `GREENNODE_CLIENT_SECRET`, `GREENNODE_AGENT_IDENTITY`, `GREENNODE_ENDPOINT_URL` — do not set these in `deploy.env`.
 
 ## Secret Handling
 
-Do not commit:
+Never commit:
 
-- Telegram bot token
-- Google service account credentials
-- AI API key
+- `TELEGRAM_BOT_TOKEN`
+- `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` (or service account file)
+- `AI_API_KEY`
+- `GREENNODE_CLIENT_ID` / `GREENNODE_CLIENT_SECRET`
 
-Recommended:
-
-- local: keep secrets in `runtime.yaml`
-- deploy: keep secrets in `.agentbase/deploy.env`
+For local development: keep secrets in `runtime.yaml`.
+For deployment: keep secrets in `deploy.env`, passed via `--env-file deploy.env`.
 
 ## Integration Rule
 
-External integrations should stay behind interfaces.
-
-That keeps:
-
-- workflow logic independent from vendor SDKs
-- storage replaceable later
-- AI optional instead of central to the system
+External integrations stay behind interfaces (`WorkflowStore`, `RequestInputAssistant`). This keeps workflow logic independent from vendor SDKs and makes storage replaceable.

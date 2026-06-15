@@ -1,107 +1,65 @@
 # Standalone vs AgentBase-Native
 
-## Current Approach — Polling
+## Current Design — Polling
 
-The bot continuously polls Telegram in a background thread. AgentBase is used purely as a container host — the `/health` endpoint is the only one that sees any traffic.
+The bot polls Telegram in a background daemon thread. AgentBase is used as a container host only — the `/health` endpoint is the only one that sees platform traffic.
 
-```text
-Container start → background thread polling Telegram ←→ Telegram API
-AgentBase endpoint: /health only
-```
-
-**Is this the wrong design?**
-
-Not wrong in a standalone context — this is the standard way to write a Telegram bot when self-hosting on any server. The code has no dependency on AgentBase and can run on a VPS, EC2, GCP, or any container host without modification. That is its biggest strength: **full portability**.
-
-However, it is a poor fit for AgentBase: the container runs 24/7 without producing any invocations, billing does not reflect actual usage, and the entire platform ecosystem is bypassed.
+This is the standard pattern for a self-hosted Telegram bot: portable, no AgentBase dependency, runs on any container host. It is, however, a poor fit for AgentBase — the container runs 24/7 regardless of traffic and the platform ecosystem (Memory, Identity, observability) is bypassed.
 
 ---
 
-## The AgentBase-Native Approach — Webhook
+## AgentBase-Native Design — Webhook
 
-Telegram pushes each message to the AgentBase endpoint. Every message becomes an independent invocation.
+Telegram pushes each message as a POST to the AgentBase endpoint. Every message becomes a traceable invocation.
 
-```text
-Telegram user → POST /invoke → AgentBase handler() → async reply
-```
-
----
-
-## Comparison
-
-| | Polling | Webhook |
-|---|---|---|
-| Correct for standalone bot | Yes | Unnatural |
-| Correct for AgentBase model | No | Yes |
+| | Polling (current) | Webhook (target) |
+| --- | --- | --- |
+| Portability | Runs anywhere | Tied to AgentBase webhook URL |
 | Scale-to-zero | No | Yes |
+| In-memory state risk | Lost on restart | No — state in Memory Service |
 | Cross-thread complexity | Yes | No |
-| Parallel LLM calls (`asyncio.gather`) | No | Yes |
+| Parallel LLM calls | No | Yes (`asyncio.gather`) |
+| Per-invocation observability | No | Yes |
 | Local debugging | Easy | Requires ngrok |
-| Session state | In-memory TTLCache | External store |
 
 ---
 
-## What You Gain from the AgentBase Ecosystem After Migration
+## What You Gain After Migration
 
-### Memory Service
+**Memory Service** — replaces `TTLCache`. Draft state survives restarts and works across replicas. Remove `cachetools` and `threading.Lock`.
 
-Replaces in-memory TTLCache. Session state persists across restarts, survives container crashes, and works correctly when multiple replicas run. No more OOM risk from unbounded growth, no `RLock` needed.
+**Observability** — each message has its own log stream, latency measurement, and CPU/RAM breakdown. Currently only container stdout is available.
 
-**What to do:**
+**Identity Service** — store `AI_API_KEY` and `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` in AgentBase instead of env vars. Rotate without redeploying.
 
-- Create a Memory instance via `/agentbase-memory`
-- Replace `_pending_drafts`, `_pending_resubmit`, `_partial_drafts` TTLCache with Memory Service read/write calls
-- Remove `cachetools` dependency and `_draft_lock`
-
-### Monitor & Observability
-
-Each message becomes a traceable invocation with its own log stream, latency measurement, and CPU/RAM breakdown. Currently only container-level stdout is available — impossible to correlate a slow response with a specific user or request.
-
-**What to do:**
-- Switch to webhook so each message produces an invocation record
-- Use `/agentbase-monitor` to view per-invocation logs and latency dashboards
-- No code changes needed beyond the webhook migration itself
-
-### Identity Service
-
-Store the LLM API key and Google service account credentials in AgentBase instead of baking them into env vars or the container image. Credentials are fetched at runtime, can be rotated without redeploying, and never appear in build artifacts.
-
-**What to do:**
-- Register an API key provider for the LLM key via `/agentbase-identity`
-- Register an API key provider for the Google service account JSON via `/agentbase-identity`
-- Replace env var reads in config with SDK credential injection (`requires_api_key` decorator or `IdentityClient.get_delegated_api_key`)
-- Remove `AI_API_KEY` and `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` from `deploy.env`
-
-### Usage-based Billing
-
-Charges apply only when messages are actually processed. Currently the container runs 24/7 regardless of traffic volume.
-
-**What to do:**
-- Switch to webhook (billing follows invocations automatically)
-- Set `min-replicas=0` in the runtime config
-
-### Scale-to-zero
-
-The container sleeps when there are no messages and wakes up on the first incoming webhook. Cold start on python-telegram-bot is under 2 seconds — acceptable for a low-traffic internal tool.
-
-**What to do:**
-- Switch to webhook
-- Update runtime: `--min-replicas 0`
-- Ensure `GET /health` responds quickly on startup so the platform marks the replica ready before Telegram retries the webhook
+**Usage-based billing + scale-to-zero** — pay per message, not per hour. Set `--min-replicas 0`.
 
 ---
 
-## Migration Steps
+## Migration Phases
 
 Must be done in order:
 
-1. **Externalize session state** — migrate TTLCache to AgentBase Memory Service. This is the largest piece of work since the entire draft flow depends on in-memory state.
-2. **Switch to webhook** — disable polling, add a route to receive Telegram POST requests, register `setWebhook`, remove `asyncio.to_thread` and `asyncio.run_coroutine_threadsafe`.
-3. **Async LLM client** — replace `httpx.Client` with `httpx.AsyncClient` and use `asyncio.gather` for parallel LLM calls.
+| Phase | Work | Time |
+| --- | --- | --- |
+| 1 — Externalize state | Migrate `_pending_drafts`, `_pending_resubmit`, `_partial_drafts` → Memory Service; `_chat_registry` → Google Sheets worksheet | ~5-6h |
+| 2 — Switch to webhook | Disable polling, add `/telegram-webhook` route, register `setWebhook`, remove cross-thread bridges | ~3-4h |
+| 3 — Async LLM | `httpx.AsyncClient`, `asyncio.gather` for classify + assist. Cuts LLM latency in half | ~2h |
+| 4 — Identity Service | Remove secrets from env, fetch via `IdentityClient` at runtime | ~2h |
 
-**When to migrate:**
+Phase 1+2 unlock the main benefits. Phase 3 is a latency improvement. Phase 4 is a security improvement and can be done independently after Phase 2.
 
-- The bot feels slow and LLM latency needs to improve
-- Expanding to additional channels (Zalo, web)
-- Scale-to-zero is needed to reduce costs
-- Starting a new agent from scratch — use webhook-native from the beginning
+Phase 1 is the prerequisite for everything else and carries the most risk — validate state persistence with polling still enabled before touching the network layer.
+
+---
+
+## When to Migrate
+
+Migrate when you need any of:
+
+- scale-to-zero (cost or idle time)
+- per-message observability
+- multi-replica support
+- credential rotation without redeploying
+
+Stay on polling if the bot is working well and the above are not priorities.
