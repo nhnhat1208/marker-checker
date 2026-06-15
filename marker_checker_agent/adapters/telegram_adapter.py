@@ -144,7 +144,9 @@ class TelegramAdapter(TelegramCommandsMixin):
         application.add_handler(CommandHandler("discard", self._discard_command))
         application.add_handler(CommandHandler("resubmit", self._resubmit_command))
         application.add_handler(CommandHandler("mypending", self._mypending_command))
+        application.add_handler(CommandHandler("requests", self._requests_command))
         application.add_handler(CommandHandler("myapprovals", self._myapprovals_command))
+        application.add_handler(CommandHandler("approvals", self._approvals_command))
         application.add_handler(CommandHandler("approve", self._approve_command))
         application.add_handler(CommandHandler("reject", self._reject_command))
         application.add_handler(CommandHandler("needinfo", self._needinfo_command))
@@ -155,7 +157,7 @@ class TelegramAdapter(TelegramCommandsMixin):
         application.add_handler(
             CallbackQueryHandler(
                 self._handle_callback_query,
-                pattern=r"^(approve|reject|needinfo):.+$",
+                pattern=r"^(approve|reject|needinfo|confirm|cancel):.+$",
             )
         )
         application.add_handler(
@@ -192,7 +194,9 @@ class TelegramAdapter(TelegramCommandsMixin):
             BotCommand("discard", "Cancel the pending draft"),
             BotCommand("resubmit", "Revise and resubmit after Need Info"),
             BotCommand("mypending", "List your active requests"),
+            BotCommand("requests", "List your active requests"),
             BotCommand("myapprovals", "List requests waiting for your approval"),
+            BotCommand("approvals", "List requests waiting for your approval"),
             BotCommand("approve", "Approve a request"),
             BotCommand("reject", "Reject a request"),
             BotCommand("needinfo", "Ask requester for more information"),

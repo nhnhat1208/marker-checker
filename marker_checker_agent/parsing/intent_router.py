@@ -46,12 +46,20 @@ class FreeformIntentRouter:
     )
     _MY_PENDING_PATTERN = re.compile(
         r"^(?:my\s+(?:pending|open)\s+requests|my\s+requests|requests\s+for\s+me"
-        r"|(?:list|show)(?:\s+my)?\s+requests?)\s*$",
+        r"|(?:list|show)(?:\s+my)?\s+requests?"
+        r"|show\s+(?:my\s+)?last\s+request|last\s+request)\s*$",
         re.IGNORECASE,
     )
     _PENDING_APPROVALS_PATTERN = re.compile(
         r"^(?:what\s+needs\s+approval|pending\s+approvals|my\s+approvals"
-        r"|what\s+should\s+i\s+approve|requests\s+to\s+approve|can\s+i\s+approve\s+something)\s*$",
+        r"|what\s+should\s+i\s+approve|requests\s+to\s+approve|can\s+i\s+approve\s+something"
+        r"|list\s+(?:my\s+)?approvals|show\s+(?:my\s+)?approvals)\s*$",
+        re.IGNORECASE,
+    )
+    # "search nginx" / "find requests for nginx" / "show request merchant reconcile"
+    # Placed after _LOOKUP_PATTERN so "show request REQ-XXXX" is caught as LOOKUP first.
+    _SEARCH_PATTERN = re.compile(
+        r"^(?:(?:/)?search|find\s+requests?\s+for|show\s+request)\s+(?P<target>.+?)\s*$",
         re.IGNORECASE,
     )
 
@@ -79,6 +87,10 @@ class FreeformIntentRouter:
          lambda _: RoutedIntent(operation=Operation.MY_PENDING, request_id="")),
         (_PENDING_APPROVALS_PATTERN,
          lambda _: RoutedIntent(operation=Operation.PENDING_APPROVALS, request_id="")),
+        (_SEARCH_PATTERN,
+         lambda m: RoutedIntent(
+             operation=Operation.SEARCH, request_id="", target_name=m.group("target").strip(),
+         )),
     ]
 
     def route(self, text: str) -> RoutedIntent | None:

@@ -17,10 +17,9 @@ Use plain text only. Do not use Markdown, bullet points, or any special formatti
 """.strip()
 
 REQUEST_CONFIRMATION_SYSTEM_PROMPT = """
-Write one short confirmation message for a marker-checker approval workflow.
-Be concise and easy to verify.
-End by telling the user to reply with /confirm.
-Use plain text only. Do not use Markdown, bullet points, or any special formatting.
+Write one concise sentence describing what this change does or its likely impact.
+Do not include instructions about confirming or submitting — those are handled by UI buttons.
+Plain text only. No Markdown. One sentence max.
 """.strip()
 
 REQUEST_STATUS_SUMMARY_SYSTEM_PROMPT = """
