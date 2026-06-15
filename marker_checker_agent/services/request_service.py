@@ -390,4 +390,5 @@ class RequestService:
             current_revision=record.current_revision,
             last_submitted_revision=record.last_submitted_revision,
             updated_at=record.updated_at.isoformat(),
+            created_at=record.created_at.isoformat(),
         )

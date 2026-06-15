@@ -12,16 +12,13 @@ Chat-first approval agent for a simple marker-checker workflow.
 
 ## System Shape
 
-```text
-Telegram or API
-    ->
-Agent Runtime
-    ->
-Orchestrator
-    -> RequestService / AuditService
-    -> optional LLM assistance
-    ->
-Google Sheets
+```mermaid
+flowchart TD
+    A[Telegram / API] --> B[Agent Runtime]
+    B --> C[Orchestrator]
+    C --> D[RequestService / AuditService]
+    C --> E[LLM assistance]
+    D --> F[(Google Sheets)]
 ```
 
 ## Quick Start
@@ -58,11 +55,18 @@ make config-check
 
 ## Main Config
 
-Use:
+- `runtime.yaml` — local app config (gitignored, copy from `runtime.example.yaml`)
+- `deploy.env` — runtime env vars for AgentBase deploy (gitignored, copy from `deploy.example.env`)
+- `.greennode.json` — IAM credentials for AgentBase CLI (gitignored, copy from `.greennode.example.json`)
 
-- `runtime.yaml` for local config
-- `runtime.example.yaml` as the committed template
-- `.agentbase/deploy.env` for deploy-time overrides
+To set up from scratch:
+
+```bash
+cp runtime.example.yaml runtime.yaml
+cp deploy.example.env deploy.env
+cp .greennode.example.json .greennode.json
+# fill in secrets: TELEGRAM_BOT_TOKEN, GOOGLE_SERVICE_ACCOUNT_JSON_BASE64, AI_API_KEY, client_id, client_secret
+```
 
 Minimum values you need:
 
@@ -97,16 +101,11 @@ Local image build:
 make docker-build
 ```
 
-AgentBase deploy inputs:
-
-- `.greennode.json`
-- `.agentbase/deploy.env`
-
 Typical prompt:
 
 ```text
 Use /agentbase-deploy to redeploy this repo as the existing Custom Agent.
-Use `.agentbase/deploy.env` as the runtime env file.
+Use `deploy.env` as the runtime env file.
 Use AgentBase managed Container Registry.
 Use linux/amd64.
 Use the existing flavor and PUBLIC mode.

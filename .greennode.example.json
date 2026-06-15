@@ -1,0 +1,4 @@
+{
+  "client_id": "<your-iam-client-id>",
+  "client_secret": "<your-iam-client-secret>"
+}

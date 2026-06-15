@@ -24,7 +24,14 @@ class WorkflowConfig(BaseModel):
 
 
 class _EnvFirstSettings(BaseSettings):
-    """BaseSettings where env vars take priority over constructor kwargs (YAML values)."""
+    """BaseSettings where env vars take priority over constructor kwargs (YAML values).
+
+    env_ignore_empty=True: empty-string env vars are treated as unset and fall through
+    to the next source (YAML init kwargs or field defaults). This prevents platform
+    environments that inject blank env vars for "removed" keys from crashing startup.
+    """
+
+    model_config = SettingsConfigDict(env_ignore_empty=True)
 
     @classmethod
     def settings_customise_sources(

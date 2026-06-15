@@ -58,17 +58,17 @@ graph TB
 sequenceDiagram
     participant U as User (Telegram)
     participant TGAPI as Telegram API
-    participant LOOP as Polling Loop<br/>(daemon thread)
+    participant PTHR as Polling Loop<br/>(daemon thread)
     participant TP as Thread Pool<br/>(asyncio.to_thread)
     participant ORCH as Orchestrator
     participant LLM as LLM Provider
     participant GS as Google Sheets
 
-    LOOP->>TGAPI: GET getUpdates (every second)
-    TGAPI-->>LOOP: [update: text message]
-    LOOP->>LOOP: dispatch to _text_message handler (async)
-    LOOP->>TP: asyncio.to_thread(orchestrator.handle_requester_message)
-    Note over LOOP,TP: Polling loop is freed while orchestrator runs
+    PTHR->>TGAPI: GET getUpdates (every second)
+    TGAPI-->>PTHR: [update: text message]
+    PTHR->>PTHR: dispatch to _text_message handler (async)
+    PTHR->>TP: asyncio.to_thread(orchestrator.handle_requester_message)
+    Note over PTHR,TP: Polling loop is freed while orchestrator runs
     TP->>ORCH: handle_requester_message(text, handle)
     ORCH->>ORCH: draft_manager.pop_resubmit(handle)
     ORCH->>LLM: classify_intent(text) [httpx sync]
@@ -77,8 +77,8 @@ sequenceDiagram
     LLM-->>ORCH: AssistedParseResult
     ORCH->>ORCH: draft_manager.set_draft(handle, draft)
     ORCH-->>TP: {status: CONFIRMATION_REQUIRED, message: ...}
-    TP-->>LOOP: result dict
-    LOOP->>TGAPI: reply_text("Here is your draft...")
+    TP-->>PTHR: result dict
+    PTHR->>TGAPI: reply_text("Here is your draft...")
     TGAPI-->>U: message
 ```
 
@@ -88,28 +88,28 @@ sequenceDiagram
 sequenceDiagram
     participant U as User (Telegram)
     participant TGAPI as Telegram API
-    participant LOOP as Polling Loop<br/>(daemon thread)
+    participant PTHR as Polling Loop<br/>(daemon thread)
     participant TP as Thread Pool
     participant ORCH as Orchestrator
     participant GS as Google Sheets
     participant APRVR as Approver (Telegram)
 
     U->>TGAPI: /confirm
-    TGAPI-->>LOOP: update
-    LOOP->>TP: asyncio.to_thread(orchestrator.handle_requester_message, "/confirm")
+    TGAPI-->>PTHR: update
+    PTHR->>TP: asyncio.to_thread(orchestrator.handle_requester_message, "/confirm")
     TP->>ORCH: handle_requester_message("/confirm")
     ORCH->>ORCH: draft_manager.pop_draft(handle)
     ORCH->>GS: create_request() [gspread sync]
     GS-->>ORCH: RequestRecord
     ORCH->>ORCH: notifier.notify_approver(payload)
     Note over ORCH: Still in thread pool worker —<br/>cannot await bot.send_message directly
-    ORCH->>LOOP: asyncio.run_coroutine_threadsafe(bot.send_message, loop)
-    Note over ORCH,LOOP: Cross-thread bridge back into polling loop
-    LOOP->>TGAPI: send_message to approver chat_id
+    ORCH->>PTHR: asyncio.run_coroutine_threadsafe(bot.send_message, loop)
+    Note over ORCH,PTHR: Cross-thread bridge back into polling loop
+    PTHR->>TGAPI: send_message to approver chat_id
     TGAPI-->>APRVR: "📋 New approval request..."
     ORCH-->>TP: {status: SUBMITTED}
-    TP-->>LOOP: result dict
-    LOOP->>TGAPI: reply_text("Request REQ-XXXX submitted")
+    TP-->>PTHR: result dict
+    PTHR->>TGAPI: reply_text("Request REQ-XXXX submitted")
     TGAPI-->>U: message
 ```
 

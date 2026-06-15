@@ -8,6 +8,7 @@ build/
 # Secrets and local config
 .env
 .env.*
+deploy.env
 .greennode.json
 .agentbase/
 .agentbase-state.json

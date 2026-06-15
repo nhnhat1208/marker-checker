@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
-from telegram.error import NetworkError
+from telegram.error import Conflict, NetworkError
 
 from marker_checker_agent.domain.enums import Operation, ResponseStatus
 from marker_checker_agent.domain.models import ActorContext, MessageSource, WorkflowAction
@@ -38,6 +39,16 @@ _STATUS_ICON: dict[str, str] = {
     "approved": "🟢",
     "rejected": "🔴",
     "cancelled": "⚫",
+}
+
+_STATUS_LABEL: dict[str, str] = {
+    "draft": "Draft",
+    "submitted": "Submitted",
+    "in_review": "In Review",
+    "needs_info": "Needs Info",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "cancelled": "Cancelled",
 }
 
 _EVENT_LABEL: dict[str, str] = {
@@ -93,18 +104,7 @@ def _confirm_cancel_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
-def _fmt_diff(from_val: str, to_val: str) -> str:
-    if from_val and to_val:
-        return f"  - {from_val}\n  + {to_val}"
-    if to_val:
-        return f"  + {to_val}"
-    if from_val:
-        return f"  - {from_val}"
-    return "  —"
-
-
 def _fmt_change(from_val: str, to_val: str) -> str:
-    """Compact single-line diff for list views."""
     if from_val and to_val:
         return f"{from_val} → {to_val}"
     return to_val or from_val or "—"
@@ -121,24 +121,59 @@ def _short_note(text: str | None, max_len: int = 100) -> str:
         line = line.strip()
         if not line:
             continue
-        # Fallback non-LLM confirmation header — not useful as a note
         if line.startswith("Confirm request submission"):
             return ""
-        # Skip list-style key-value lines from the fallback format
         if line.startswith("- "):
             continue
         return line[:max_len] + ("…" if len(line) > max_len else "")
     return ""
 
 
+def _age_str(iso_str: str) -> str:
+    """Return human-readable age like '5m', '2h', '3d' from an ISO timestamp."""
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        seconds = max(0, int((datetime.now(timezone.utc) - dt).total_seconds()))
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m"
+        if seconds < 86400:
+            return f"{seconds // 3600}h"
+        return f"{seconds // 86400}d"
+    except (ValueError, TypeError):
+        return ""
+
+
+def _fmt_created(iso_str: str) -> str:
+    """Format ISO timestamp as 'YYYY-MM-DD HH:MM'."""
+    try:
+        return datetime.fromisoformat(iso_str).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return iso_str[:16]
+
+
+def _next_action(req: RequestSummary) -> str:
+    status = req.get("review_status") or ""
+    if status in ("submitted", "in_review"):
+        approver = req.get("approver_handle") or ""
+        return f"Waiting for approval from {approver}" if approver else "Waiting for approval"
+    if status == "needs_info":
+        requester = req.get("requester_handle") or ""
+        return f"Waiting for more info from {requester}" if requester else "Waiting for more info"
+    return ""
+
+
 def _format_draft(draft: DraftPreview, note: str = "") -> str:
-    diff = _fmt_diff(draft.get("change_from_summary") or "", draft.get("change_to_summary") or "")
-    parts = [
-        "📝 Draft Request\n",
-        f"Object: {draft.get('target_label') or '—'}",
-        f"Change:\n{diff}",
-        f"Approver: {draft.get('approver_handle') or '—'}",
-    ]
+    target = draft.get("target_label") or "—"
+    change_line = _fmt_change(
+        draft.get("change_from_summary") or "",
+        draft.get("change_to_summary") or "",
+    )
+    approver = draft.get("approver_handle") or "—"
+    parts = ["📝 Draft Request\n", target, change_line, f"\nApprover: {approver}"]
     if note:
         parts.append(f"\n💡 {note}")
     return "\n".join(parts)
@@ -147,29 +182,55 @@ def _format_draft(draft: DraftPreview, note: str = "") -> str:
 def _format_request(req: RequestSummary, note: str = "") -> str:
     status = req.get("review_status") or ""
     icon = _STATUS_ICON.get(status, "⚪")
-    status_label = status.replace("_", " ").title()
-    diff = _fmt_diff(req.get("change_from_summary") or "", req.get("change_to_summary") or "")
+    label = _STATUS_LABEL.get(status, status.replace("_", " ").title())
+    target = req.get("target_label") or "—"
+    change_line = _fmt_change(
+        req.get("change_from_summary") or "",
+        req.get("change_to_summary") or "",
+    )
+    requester = req.get("requester_handle") or "—"
+    approver = req.get("approver_handle") or "—"
+
     parts = [
         f"📌 {req.get('request_id') or '—'}\n",
-        f"Status: {icon} {status_label}",
-        f"Requester: {req.get('requester_handle') or '—'}",
-        f"Approver: {req.get('approver_handle') or '—'}",
-        f"\nObject: {req.get('target_label') or '—'}",
-        f"Change:\n{diff}",
+        f"{icon} {label}\n",
+        target,
+        change_line,
+        f"\n👤 {requester} → {approver}",
     ]
-    if note:
+
+    created_at = req.get("created_at") or ""
+    if created_at:
+        parts.append(f"🕒 {_fmt_created(created_at)}")
+        age = _age_str(created_at)
+        if age and status in ("submitted", "in_review", "needs_info"):
+            parts.append(f"⏳ {age} pending")
+
+    action = _next_action(req)
+    if action:
+        parts.append(f"\n💡 {action}")
+    elif note:
         parts.append(f"\n💡 {note}")
+
     return "\n".join(parts)
 
 
 def _format_request_list(requests: list[RequestSummary]) -> str:
     if not requests:
         return "No requests found."
-    blocks = ["📋 Requests\n"]
+    count = len(requests)
+    blocks = [f"📋 {count} request{'s' if count != 1 else ''}"]
     for req in requests:
-        icon = _STATUS_ICON.get(req.get("review_status") or "", "⚪")
-        change = _fmt_change(req.get("change_from_summary") or "", req.get("change_to_summary") or "")
-        blocks.append(f"{icon} {req.get('request_id') or '—'}\n{req.get('target_label') or '—'}\n{change}")
+        status = req.get("review_status") or ""
+        icon = _STATUS_ICON.get(status, "⚪")
+        label = _STATUS_LABEL.get(status, status.replace("_", " ").title())
+        req_id = req.get("request_id") or "—"
+        target = req.get("target_label") or "—"
+        change_line = _fmt_change(
+            req.get("change_from_summary") or "",
+            req.get("change_to_summary") or "",
+        )
+        blocks.append(f"{icon} {req_id} · {label}\n{target}\n{change_line}")
     return "\n\n".join(blocks)
 
 
@@ -272,6 +333,8 @@ class TelegramCommandsMixin:
     async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         if isinstance(context.error, NetworkError):
             LOGGER.debug("Telegram network error (PTB will retry): %s", context.error)
+        elif isinstance(context.error, Conflict):
+            LOGGER.warning("Telegram polling conflict: %s", context.error)
         else:
             LOGGER.exception("Unhandled bot error", exc_info=context.error)
 

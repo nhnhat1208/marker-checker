@@ -167,24 +167,59 @@ class TelegramAdapter(TelegramCommandsMixin):
         return application
 
     def _run_polling(self) -> None:
+        import time
+        from telegram.error import Conflict
+
         if self._application is None:
             return
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        self._loop = loop
-        try:
-            self._application.run_polling(
-                drop_pending_updates=True,
-                close_loop=False,
-                stop_signals=None,
-            )
-        finally:
-            self._loop = None
+
+        # During rolling deploys the old container keeps polling until the platform
+        # terminates it.  When the new container starts and gets a 409 Conflict it
+        # rebuilds the Application and retries; the old container is typically gone
+        # within 30 s.
+        _CONFLICT_RETRY_INTERVAL = 10   # seconds between retries
+        _CONFLICT_MAX_RETRIES    = 18   # 18 × 10 s = 3 min ceiling
+
+        bot_token = self._config.bot_token.strip()
+
+        for attempt in range(_CONFLICT_MAX_RETRIES + 1):
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._loop = loop
+            conflict = False
             try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
+                self._application.run_polling(
+                    drop_pending_updates=True,
+                    close_loop=False,
+                    stop_signals=None,
+                )
+                return  # clean exit — stop retrying
+            except Conflict:
+                conflict = True
+                if attempt < _CONFLICT_MAX_RETRIES:
+                    LOGGER.warning(
+                        "Telegram polling conflict (another instance still running) — "
+                        "retrying in %ds (attempt %d/%d)",
+                        _CONFLICT_RETRY_INTERVAL, attempt + 1, _CONFLICT_MAX_RETRIES,
+                    )
+                else:
+                    LOGGER.error(
+                        "Telegram polling conflict persists after %d retries — giving up",
+                        _CONFLICT_MAX_RETRIES,
+                    )
             finally:
-                asyncio.set_event_loop(None)
-                loop.close()
+                self._loop = None
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                finally:
+                    asyncio.set_event_loop(None)
+                    loop.close()
+
+            if conflict and attempt < _CONFLICT_MAX_RETRIES:
+                time.sleep(_CONFLICT_RETRY_INTERVAL)
+                # Rebuild a fresh Application — PTB internal state may be partial after a
+                # failed run_polling.
+                self._application = self._build_application(bot_token)
 
     async def _post_init(self, application: BotApplication) -> None:
         await application.bot.set_my_commands([

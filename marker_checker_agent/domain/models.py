@@ -42,6 +42,7 @@ class RequestSummary(TypedDict):
     current_revision: int
     last_submitted_revision: int
     updated_at: str
+    created_at: str
 
 
 class TimelineEvent(TypedDict):
