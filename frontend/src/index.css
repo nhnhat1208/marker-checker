@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.75rem;
+    --chat-bg: 210 20% 96%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --ring: 217.2 91.2% 59.8%;
+    --chat-bg: 240 10% 5.5%;
+  }
+
+  /* Dim — GitHub dark dimmed: softer blue-gray, easier on the eyes */
+  .dim {
+    --background: 215 28% 17%;
+    --foreground: 215 14% 78%;
+    --muted: 213 17% 23%;
+    --muted-foreground: 213 16% 52%;
+    --border: 213 12% 28%;
+    --input: 213 12% 28%;
+    --primary: 212 92% 65%;
+    --primary-foreground: 220 60% 10%;
+    --accent: 213 17% 23%;
+    --accent-foreground: 215 14% 78%;
+    --ring: 212 92% 65%;
+    --chat-bg: 213 22% 14%;
+  }
+
+  /* Dracula — dark purple theme */
+  .dracula {
+    --background: 231 15% 18%;
+    --foreground: 60 30% 96%;
+    --muted: 232 14% 25%;
+    --muted-foreground: 240 7% 52%;
+    --border: 232 14% 30%;
+    --input: 232 14% 30%;
+    --primary: 265 89% 78%;
+    --primary-foreground: 231 15% 12%;
+    --accent: 135 94% 65%;
+    --accent-foreground: 231 15% 12%;
+    --ring: 265 89% 78%;
+    --chat-bg: 231 14% 15%;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* CodeMirror overrides */
+  .cm-editor { outline: none !important; }
+  .cm-editor.cm-focused { outline: none !important; }
+  .cm-scroller { font-family: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace !important; }
+}

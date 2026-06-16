@@ -3,17 +3,17 @@ from __future__ import annotations
 import unittest
 from uuid import uuid4
 
-from marker_checker_agent.config import AppConfig, RuntimeConfig
-from marker_checker_agent.domain.models import (
+from agent.config import AppConfig, RuntimeConfig
+from agent.domain.models import (
     AuditEventRecord,
     MessageSource,
     RequestConversationRecord,
     RequestRecord,
     RequestSummary,
 )
-from marker_checker_agent.request_coordinator import RequestCoordinator
-from marker_checker_agent.services.audit_service import AuditService
-from marker_checker_agent.services.request_service import RequestService
+from agent.request_coordinator import RequestCoordinator
+from agent.services.audit_service import AuditService
+from agent.services.request_service import RequestService
 
 
 class InMemoryWorkflowStore:
@@ -77,7 +77,9 @@ class WorkflowTestCase(unittest.TestCase):
             audit_service=self.audit_service,
         )
         self.notifications: list[RequestSummary] = []
-        self.orchestrator.set_approver_notification_callback(self.notifications.append)
+        self.orchestrator.set_approver_notification_callback(
+            lambda payload, _note: self.notifications.append(payload)
+        )
         self.source = MessageSource(
             source_channel="test",
             channel_id="local-chat",

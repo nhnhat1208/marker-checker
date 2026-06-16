@@ -10,11 +10,7 @@ The docs are intentionally small and grouped into three areas.
 
 ## Technical
 
-- [Architecture](./technical-design/architecture.md)
-- [Configuration And Integrations](./technical-design/configuration-and-integrations.md)
-- [Architecture Diagrams](./technical-design/architecture-diagrams.md) — C4 component + sequence diagrams for current (polling) and target (webhook) approaches
-- [Standalone vs AgentBase-Native](./technical-design/standalone-vs-agentbase-native.md) — strategy overview: current design, why it's a poor fit for AgentBase, and what to gain by migrating
-
-## Delivery
-
-- [Roadmap](./delivery-plan/roadmap.md) — Phase 0 (done) + AgentBase-native migration plan: session state → webhook → async LLM → Identity Service
+- [Architecture](./technical-design/architecture.md) — layers, components, state/caching, WS contract pipeline, Telegram mode, AgentBase migration status
+- [Web UI](./technical-design/web-ui.md) — React frontend, WebSocket protocol, file structure, phases
+- [Configuration And Integrations](./technical-design/configuration-and-integrations.md) — config split, integrations, deploy commands
+- [Architecture Diagrams](./technical-design/architecture-diagrams.md) — component + sequence diagrams for webhook (production) and polling (local dev) modes

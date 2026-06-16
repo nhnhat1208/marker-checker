@@ -1,22 +1,28 @@
 from __future__ import annotations
 
-from marker_checker_agent.ai.intent_types import AssistedParseResult, IntentNewRequest
-from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.domain.models import ActorContext, WorkflowAction
-from marker_checker_agent.parsing.request_parser import ParsedRequest
-from marker_checker_agent.request_coordinator import RequestCoordinator
+from agent.ai.intent_types import AssistedParseResult, IntentNewRequest
+from agent.domain.enums import Operation
+from agent.domain.models import ActorContext, WorkflowAction
+from agent.parsing.request_parser import ParsedRequest
+from agent.request_coordinator import RequestCoordinator
 from tests.workflow_test_support import WorkflowTestCase
 
 
 class _NewRequestFakeBase:
-    def classify_intent(self, text: str) -> IntentNewRequest:
+    def classify_intent(self, text: str, user_context: str | None = None) -> IntentNewRequest:
         return IntentNewRequest()  # empty fields → falls through to assist_request_text
+
+    def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
+        return AssistedParseResult(parsed_request=None, parser_name="llm_assisted")
+
+    def generate_impact_note(self, *, target_label: str, change_from: str, change_to: str) -> str | None:
+        return None
 
 
 class LlmAssistanceTest(WorkflowTestCase):
     def test_llm_input_assistance_can_build_draft(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
-            def assist_request_text(self, text: str) -> AssistedParseResult:
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
                         target_label="sample-object",
@@ -69,7 +75,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
     def test_llm_input_assistance_handle_is_normalized(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
-            def assist_request_text(self, text: str) -> AssistedParseResult:
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
                         target_label="sample-object",
@@ -120,7 +126,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
     def test_llm_input_assistance_metadata_is_returned(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
-            def assist_request_text(self, text: str) -> AssistedParseResult:
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
                         target_label="sample-object",
@@ -186,7 +192,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
     def test_llm_clarification_message_is_used(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
-            def assist_request_text(self, text: str) -> AssistedParseResult:
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
                         target_label="sample-object",
@@ -243,7 +249,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
     def test_llm_status_and_history_summaries_are_returned(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
-            def assist_request_text(self, text: str) -> AssistedParseResult:
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
                         target_label="sample-object",
@@ -320,7 +326,7 @@ class LlmAssistanceTest(WorkflowTestCase):
 
     def test_llm_action_result_message_is_used(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
-            def assist_request_text(self, text: str) -> AssistedParseResult:
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
                         target_label="sample-object",

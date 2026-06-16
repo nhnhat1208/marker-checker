@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from marker_checker_agent.config import load_runtime_config
+from agent.config import load_runtime_config
 
 
 class ConfigOverridesTest(unittest.TestCase):
@@ -18,10 +18,9 @@ class ConfigOverridesTest(unittest.TestCase):
                     [
                         "telegram:",
                         "  enabled: true",
-                        "  polling_enabled: true",
+                        "  mode: polling",
                         "  bot_token: \"\"",
                         "google_sheets:",
-                        "  enabled: true",
                         "  spreadsheet_id: \"\"",
                         "  service_account_json_base64: \"\"",
                         "ai:",
@@ -35,9 +34,8 @@ class ConfigOverridesTest(unittest.TestCase):
                 os.environ,
                 {
                     "TELEGRAM_ENABLED": "true",
-                    "TELEGRAM_POLLING_ENABLED": "false",
+                    "TELEGRAM_MODE": "webhook",
                     "TELEGRAM_BOT_TOKEN": "deploy-token",
-                    "GOOGLE_SHEETS_ENABLED": "true",
                     "GOOGLE_SHEETS_SPREADSHEET_ID": "sheet-123",
                     "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64": "base64-creds",
                     "AI_ENABLED": "true",
@@ -56,9 +54,8 @@ class ConfigOverridesTest(unittest.TestCase):
                 config = load_runtime_config(base_dir)
 
         self.assertTrue(config.telegram.enabled)
-        self.assertFalse(config.telegram.polling_enabled)
+        self.assertEqual(config.telegram.mode, "webhook")
         self.assertEqual(config.telegram.bot_token, "deploy-token")
-        self.assertTrue(config.google_sheets.enabled)
         self.assertEqual(config.google_sheets.spreadsheet_id, "sheet-123")
         self.assertEqual(
             config.google_sheets.service_account_json_base64,
@@ -85,11 +82,12 @@ class ConfigOverridesTest(unittest.TestCase):
             (base_dir / "runtime.yaml").write_text(
                 "\n".join(
                     [
+                        "persistence:",
+                        "  backend: google_sheets",
                         "telegram:",
                         "  enabled: true",
                         "  bot_token: \"\"",
                         "google_sheets:",
-                        "  enabled: true",
                         "  spreadsheet_id: \"\"",
                         "  service_account_file: \"\"",
                         "  service_account_json_base64: \"\"",
@@ -111,6 +109,8 @@ class ConfigOverridesTest(unittest.TestCase):
         self.assertIn("google_sheets.spreadsheet_id is required", message)
         self.assertIn("Google Sheets credentials are required", message)
         self.assertIn("ai.model is required", message)
+        self.assertIn("ai.base_url is required", message)
+        self.assertIn("ai.api_key is required", message)
 
 
 if __name__ == "__main__":

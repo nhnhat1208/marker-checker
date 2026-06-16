@@ -9,11 +9,11 @@ build/
 .env
 .env.*
 deploy.env
+runtime.local.yaml
 .greennode.json
 .agentbase/
 .agentbase-state.json
 *.credentials.json
-runtime.yaml
 
 # Virtual environment
 .venv/
@@ -36,6 +36,12 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Node / React frontend
+node_modules/
+frontend/.vite/
+frontend/.rsbuild/
+frontend/dist/
 
 # Logs
 *.log

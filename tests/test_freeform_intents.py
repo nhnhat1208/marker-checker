@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.domain.models import ActorContext, WorkflowAction
+from agent.domain.enums import Operation
+from agent.domain.models import ActorContext, WorkflowAction
 from tests.workflow_test_support import WorkflowTestCase
 
 

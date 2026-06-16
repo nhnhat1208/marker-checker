@@ -1,0 +1,52 @@
+# runtime.yaml — non-secret application configuration.
+# Committed to git. Secrets (bot_token, credentials, api_key, spreadsheet_id) go in deploy.env only.
+#
+# Local dev: copy deploy.example.env → deploy.env, fill in secrets, then run:
+#   make run       (starts in polling mode via runtime.local.yaml)
+#   make smoke     (verify Postgres connection)
+
+app:
+  name: marker-checker-agent
+  env: production
+  log_level: INFO
+  primary_channel: telegram
+  request_id_prefix: REQ
+
+workflow:
+  require_confirmation: true
+  reject_requires_reason: true
+  exact_lookup_only: true
+
+telegram:
+  enabled: true
+  # webhook: production mode — GREENNODE_ENDPOINT_URL is auto-injected by AgentBase Runtime.
+  # polling: local development fallback — override via runtime.local.yaml
+  mode: webhook
+
+persistence:
+  # postgres: production (Neon) — set POSTGRES_DSN in deploy.env
+  # google_sheets: legacy fallback — set GOOGLE_SHEETS_* in deploy.env
+  backend: postgres
+
+google_sheets:
+  auto_create_worksheets: true
+  worksheets:
+    requests: requests
+    audit_events: audit_events
+    request_conversations: request_conversations
+    chat_registry: chat_registry
+    pending_drafts: pending_drafts
+    pending_resubmit: pending_resubmit
+
+ai:
+  enabled: true
+  prompt_version: request-parse-v1
+  base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
+  timeout_seconds: 30.0
+  max_tokens: 1500
+  temperature: 0.0
+  top_p: 0.95
+  presence_penalty: 0.0
+
+memory:
+  # Set MEMORY_MEMORY_ID in deploy.env to enable AgentBase Memory Service

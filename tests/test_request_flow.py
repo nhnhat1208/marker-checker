@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.domain.models import ActorContext, WorkflowAction
+from agent.domain.enums import Operation
+from agent.domain.models import ActorContext, MessageSource, WorkflowAction
 from tests.workflow_test_support import WorkflowTestCase
 
 
@@ -96,3 +96,31 @@ class RequestFlowTest(WorkflowTestCase):
             resubmit_response["request"]["last_submitted_revision"],
             2,
         )
+
+    def test_web_request_can_route_to_email_approver(self) -> None:
+        web_source = MessageSource(
+            source_channel="web",
+            channel_id="requester@example.com",
+            thread_id="requester@example.com",
+        )
+        requester = ActorContext(name="Requester One", handle="requester@example.com")
+
+        draft_response = self.orchestrator.handle_requester_message(
+            text="for api-gateway, change from disabled to enabled, ask Annie@example.com to approve",
+            requester=requester,
+            source=web_source,
+        )
+        self.assertEqual(draft_response["status"], "confirmation_required")
+        self.assertEqual(draft_response["draft"]["approver_handle"], "annie@example.com")
+
+        submit_response = self.orchestrator.handle_requester_message(
+            text="/confirm",
+            requester=requester,
+            source=web_source,
+        )
+        self.assertEqual(submit_response["status"], "submitted")
+        self.assertEqual(submit_response["request"]["approver_handle"], "annie@example.com")
+
+        record = self.request_service.get_request(submit_response["request"]["request_id"])
+        self.assertEqual(record.origin_channel_id, "requester@example.com")
+        self.assertEqual(record.approver_handle, "annie@example.com")

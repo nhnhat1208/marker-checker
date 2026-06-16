@@ -5,8 +5,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from marker_checker_agent.adapters.telegram_adapter import TelegramAdapter
-from marker_checker_agent.config import TelegramConfig
+from agent.adapters.telegram_adapter import TelegramAdapter
+from agent.config import TelegramConfig
 
 
 class DummyOrchestrator:
@@ -32,7 +32,7 @@ class FakeApplication:
 class TelegramAdapterTest(unittest.TestCase):
     def test_run_polling_creates_event_loop_for_background_thread(self) -> None:
         adapter = TelegramAdapter(
-            config=TelegramConfig(enabled=True, polling_enabled=True, bot_token="token"),
+            config=TelegramConfig(enabled=True, mode="polling", bot_token="token"),
             orchestrator=DummyOrchestrator(),  # type: ignore[arg-type]
         )
         fake_application = FakeApplication()
@@ -56,7 +56,7 @@ class TelegramAdapterTest(unittest.TestCase):
 
     def test_start_polling_skips_blank_token(self) -> None:
         adapter = TelegramAdapter(
-            config=TelegramConfig(enabled=True, polling_enabled=True, bot_token="   "),
+            config=TelegramConfig(enabled=True, mode="polling", bot_token="   "),
             orchestrator=DummyOrchestrator(),  # type: ignore[arg-type]
         )
 

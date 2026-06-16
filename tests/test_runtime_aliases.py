@@ -3,10 +3,10 @@ from __future__ import annotations
 import unittest
 from typing import TYPE_CHECKING
 
-from marker_checker_agent.app import MarkerCheckerApp
+from agent.app import MarkerCheckerApp
 
 if TYPE_CHECKING:
-    from marker_checker_agent.domain.models import ActorContext, MessageSource, WorkflowAction
+    from agent.domain.models import ActorContext, MessageSource, WorkflowAction
 
 
 class DummyContext:

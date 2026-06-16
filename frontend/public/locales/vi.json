@@ -1,0 +1,34 @@
+{
+  "header": {
+    "status_ready": "Sẵn sàng",
+    "status_connecting": "Đang kết nối…",
+    "clear_chat": "Xóa lịch sử",
+    "sign_out": "Đăng xuất"
+  },
+  "empty": {
+    "headline": "Tôi có thể giúp gì?",
+    "subtitle": "Mô tả yêu cầu thay đổi bằng ngôn ngữ tự nhiên — tôi sẽ chuyển đến người duyệt phù hợp.",
+    "tip": "Gõ /help để xem tất cả lệnh",
+    "all": "Tất cả"
+  },
+  "composer": {
+    "tab_message": "Tin nhắn",
+    "tab_request": "Tạo yêu cầu",
+    "placeholders": [
+      "Mô tả yêu cầu thay đổi…",
+      "VD: bật tính năng X trên api-gateway, nhờ annie@example.com duyệt",
+      "VD: đổi timeout nginx từ 30s lên 60s, nhờ @ops xem xét",
+      "Gõ / để xem lệnh"
+    ],
+    "placeholder_connecting": "Đang kết nối…",
+    "describe": "Mô tả thay đổi…",
+    "approver": "Người duyệt",
+    "approver_placeholder": "email hoặc @handle",
+    "code_change": "Thay đổi code"
+  },
+  "lang": {
+    "label": "Ngôn ngữ",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "header": {
+    "status_ready": "Agent ready",
+    "status_connecting": "Connecting…",
+    "clear_chat": "Clear chat",
+    "sign_out": "Sign out"
+  },
+  "empty": {
+    "headline": "How can I help?",
+    "subtitle": "Describe a change request in natural language — I'll route it to the right approver.",
+    "tip": "Type /help to see all commands",
+    "all": "All"
+  },
+  "composer": {
+    "tab_message": "Message",
+    "tab_request": "Create Request",
+    "placeholders": [
+      "Describe your change request…",
+      "e.g. enable feature-X on api-gateway, ask annie@example.com to approve",
+      "e.g. change nginx timeout from 30s to 60s, @ops to review",
+      "Type / to browse commands"
+    ],
+    "placeholder_connecting": "Connecting…",
+    "describe": "Describe the change…",
+    "approver": "Approver",
+    "approver_placeholder": "email or @handle",
+    "code_change": "Code change"
+  },
+  "lang": {
+    "label": "Language",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}

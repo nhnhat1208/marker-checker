@@ -9,17 +9,17 @@ Coverage:
 """
 from __future__ import annotations
 
-from marker_checker_agent.ai.intent_types import (
+from agent.ai.intent_types import (
     AssistedParseResult,
     IntentManagement,
     IntentNewRequest,
     IntentUnknown,
 )
-from marker_checker_agent.domain.enums import Operation
-from marker_checker_agent.domain.models import ActorContext
-from marker_checker_agent.parsing.intent_router import FreeformIntentRouter
-from marker_checker_agent.parsing.request_parser import ParsedRequest
-from marker_checker_agent.request_coordinator import RequestCoordinator
+from agent.domain.enums import Operation
+from agent.domain.models import ActorContext
+from agent.parsing.intent_router import FreeformIntentRouter
+from agent.parsing.request_parser import ParsedRequest
+from agent.request_coordinator import RequestCoordinator
 from tests.workflow_test_support import WorkflowTestCase
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,27 @@ class IntentRouterPatternTest(WorkflowTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.operation, Operation.HISTORY)
 
+    def test_detail_aliases_route_to_lookup(self) -> None:
+        for text in (
+            "detail SMK-ABC-456",
+            "detial SMK-ABC-456",
+            "detail for request SMK-ABC-456",
+            "detail of request SMK-ABC-456",
+        ):
+            with self.subTest(text=text):
+                result = self._route(text)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.operation, Operation.LOOKUP)
+
+    def test_vietnamese_lookup_not_caught_by_regex(self) -> None:
+        for text in (
+            "detail cho request SMK-ABC-456",
+            "chi tiet SMK-ABC-456",
+            "xem SMK-ABC-456",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(self._route(text), msg=f"Expected no regex match for {text!r}")
+
     # --- MY_PENDING English regex ---
 
     def test_list_requests_routed(self) -> None:
@@ -92,7 +113,6 @@ class IntentRouterPatternTest(WorkflowTestCase):
             "list các request được tạo",
             "danh sách request",
             "hủy SMK-001",
-            "xem SMK-001",
             "các request chờ duyệt",
         ):
             with self.subTest(text=text):
@@ -113,11 +133,11 @@ class _FakeAssistantBase:
         self.classify_called_with = []
         self.assist_called_with = []
 
-    def classify_intent(self, text: str) -> IntentUnknown:
+    def classify_intent(self, text: str, user_context: str | None = None) -> IntentUnknown:
         self.classify_called_with.append(text)
         return IntentUnknown()
 
-    def assist_request_text(self, text: str) -> AssistedParseResult:
+    def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
         self.assist_called_with.append(text)
         return AssistedParseResult(parsed_request=None, parser_name="llm_assisted")
 
@@ -138,6 +158,9 @@ class _FakeAssistantBase:
     def generate_action_result_message(self, *, action_result) -> str | None:
         return None
 
+    def generate_impact_note(self, *, target_label, change_from, change_to) -> str | None:
+        return None
+
 
 class LlmIntentRoutingTest(WorkflowTestCase):
 
@@ -147,7 +170,9 @@ class LlmIntentRoutingTest(WorkflowTestCase):
             audit_service=self.audit_service,
             input_assistant=assistant,
         )
-        orc.set_approver_notification_callback(self.notifications.append)
+        orc.set_approver_notification_callback(
+            lambda payload, _note: self.notifications.append(payload)
+        )
         return orc
 
     def _submit_request(self, orc: RequestCoordinator) -> str:
@@ -167,7 +192,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
 
     def test_unknown_intent_returns_needs_input(self) -> None:
         class Fake(_FakeAssistantBase):
-            def classify_intent(self, text):
+            def classify_intent(self, text, user_context=None):
                 self.classify_called_with.append(text)
                 return IntentUnknown()
 
@@ -179,13 +204,14 @@ class LlmIntentRoutingTest(WorkflowTestCase):
             source=self.source,
         )
         self.assertEqual(resp["status"], "needs_input")
-        self.assertEqual(fake.assist_called_with, [], "assist_request_text must NOT be called for unknown")
+        # assist_request_text is called speculatively in parallel with classify_intent
+        self.assertEqual(len(fake.classify_called_with), 1)
 
     # --- LLM routes Vietnamese → my_pending ---
 
     def test_llm_routes_vietnamese_my_pending(self) -> None:
         class Fake(_FakeAssistantBase):
-            def classify_intent(self, text):
+            def classify_intent(self, text, user_context=None):
                 self.classify_called_with.append(text)
                 return IntentManagement(operation=Operation.MY_PENDING)
 
@@ -201,13 +227,14 @@ class LlmIntentRoutingTest(WorkflowTestCase):
         self.assertEqual(resp["status"], "ok")
         self.assertEqual(len(resp["requests"]), 1)
         self.assertEqual(resp["requests"][0]["request_id"], request_id)
-        self.assertEqual(fake.assist_called_with, [], "assist_request_text must NOT be called for my_pending")
+        # assist_request_text is called speculatively in parallel with classify_intent
+        self.assertEqual(len(fake.classify_called_with), 1)
 
     # --- LLM routes Vietnamese → pending_approvals ---
 
     def test_llm_routes_vietnamese_pending_approvals(self) -> None:
         class Fake(_FakeAssistantBase):
-            def classify_intent(self, text):
+            def classify_intent(self, text, user_context=None):
                 self.classify_called_with.append(text)
                 return IntentManagement(operation=Operation.PENDING_APPROVALS)
 
@@ -230,7 +257,7 @@ class LlmIntentRoutingTest(WorkflowTestCase):
         class Fake(_FakeAssistantBase):
             _target_id: str = ""
 
-            def classify_intent(self, text):
+            def classify_intent(self, text, user_context=None):
                 self.classify_called_with.append(text)
                 return IntentManagement(
                     operation=Operation.CANCEL,
@@ -255,11 +282,11 @@ class LlmIntentRoutingTest(WorkflowTestCase):
 
     def test_new_request_calls_assist_request_text(self) -> None:
         class Fake(_FakeAssistantBase):
-            def classify_intent(self, text):
+            def classify_intent(self, text, user_context=None):
                 self.classify_called_with.append(text)
                 return IntentNewRequest()  # empty fields → falls through to assist_request_text
 
-            def assist_request_text(self, text):
+            def assist_request_text(self, text, user_context=None):
                 self.assist_called_with.append(text)
                 return AssistedParseResult(
                     parsed_request=ParsedRequest(
