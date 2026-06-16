@@ -3,12 +3,11 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never, cast
+from typing import Annotated, Any, Literal, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-if TYPE_CHECKING:
-    from agent.domain.models import CodeFormat, RequestMode
+from agent.domain.models import CodeFormat, RequestMode
 
 
 class StructuredCodeSection(BaseModel):
