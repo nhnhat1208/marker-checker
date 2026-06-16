@@ -1,12 +1,17 @@
 import { type ReactNode } from 'react'
 import { Highlight, themes } from 'prism-react-renderer'
 import { cn } from '@/lib/utils'
+import MarkerLogo from '@/components/brand/MarkerLogo'
 import { useTheme } from '@/contexts/theme'
 import CodeDiffPreview from './CodeDiffPreview'
+import { formatChatTimestamp } from '@/lib/chatTime'
 
 type Props = {
   role: 'user' | 'agent'
   text: string
+  timestamp: number
+  userName?: string
+  userAvatarUrl?: string | null
 }
 
 type Segment =
@@ -15,7 +20,7 @@ type Segment =
 
 type CodeLabel = {
   language: string
-  title: 'Before' | 'After' | 'From' | 'To'
+  title: 'Before' | 'After' | 'Current state' | 'Proposed state' | 'Before change' | 'After change'
 }
 
 function parseSegments(text: string): Segment[] {
@@ -40,6 +45,36 @@ function renderTextSegment(content: string, isUser: boolean) {
   return (
     <div className={cn('whitespace-pre-wrap text-sm leading-7', isUser ? 'text-primary-foreground' : 'text-foreground')}>
       {trimmed}
+    </div>
+  )
+}
+
+function getInitials(name?: string) {
+  const trimmed = name?.trim()
+  if (!trimmed) return 'U'
+  const parts = trimmed.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+  }
+  return trimmed.slice(0, 2).toUpperCase()
+}
+
+function UserAvatar({ name, avatarUrl }: { name?: string; avatarUrl?: string | null }) {
+  const initials = getInitials(name)
+
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name || 'User avatar'}
+        className="mt-0.5 h-7 w-7 shrink-0 rounded-full ring-1 ring-border shadow-sm object-cover"
+      />
+    )
+  }
+
+  return (
+    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary ring-1 ring-border shadow-sm">
+      {initials}
     </div>
   )
 }
@@ -77,7 +112,7 @@ function CodeBlockCard({ content, language }: { content: string; language: strin
 }
 
 function splitTrailingLabel(content: string) {
-  const match = content.match(/^(.*?)(?:\n\s*\n)?(Before|After|From|To) \((yaml|json)\)\s*$/s)
+  const match = content.match(/^(.*?)(?:\n\s*\n)?(Before|After|Current state|Proposed state|Before change|After change) \((yaml|json)\)\s*$/s)
   if (!match) return { leadingText: content, label: null as CodeLabel | null }
   return {
     leadingText: match[1],
@@ -86,7 +121,7 @@ function splitTrailingLabel(content: string) {
 }
 
 function splitLeadingLabel(content: string) {
-  const match = content.match(/^\s*(Before|After|From|To) \((yaml|json)\)\s*([\s\S]*)$/)
+  const match = content.match(/^\s*(Before|After|Current state|Proposed state|Before change|After change) \((yaml|json)\)\s*([\s\S]*)$/)
   if (!match) return { trailingText: content, label: null as CodeLabel | null }
   return {
     trailingText: match[3],
@@ -96,17 +131,21 @@ function splitLeadingLabel(content: string) {
 
 function isPair(first: CodeLabel | null, second: CodeLabel | null) {
   if (!first || !second) return false
+  const paired =
+    (first.title === 'Before' && second.title === 'After') ||
+    (first.title === 'Current state' && second.title === 'Proposed state') ||
+    (first.title === 'Before change' && second.title === 'After change')
   return (
-    ((first.title === 'Before' && second.title === 'After') ||
-      (first.title === 'From' && second.title === 'To')) &&
+    paired &&
     first.language === second.language
   )
 }
 
-export default function MessageBubble({ role, text }: Props) {
+export default function MessageBubble({ role, text, timestamp, userName, userAvatarUrl }: Props) {
   const isUser = role === 'user'
   const segments = parseSegments(text)
   const renderedSegments: ReactNode[] = []
+  const timeLabel = formatChatTimestamp(timestamp)
 
   for (let index = 0; index < segments.length; index++) {
     const current = segments[index]
@@ -158,21 +197,30 @@ export default function MessageBubble({ role, text }: Props) {
   }
 
   return (
-    <div className={cn('flex items-start gap-2.5', isUser && 'flex-row-reverse')}>
-      {!isUser && (
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary shadow-sm">
-          <span className="select-none text-xs font-bold text-primary-foreground">M</span>
-        </div>
-      )}
+    <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start')}>
+      <div className={cn('flex items-end gap-2.5', isUser && 'flex-row-reverse')}>
+        {isUser ? (
+          <UserAvatar name={userName} avatarUrl={userAvatarUrl} />
+        ) : (
+          <MarkerLogo className="mt-0.5 h-7 w-7" title="Marker Checker agent" />
+        )}
 
-      <div className={cn(
-        'max-w-[min(100%,56rem)] rounded-2xl px-4 py-3',
-        isUser
-          ? 'bg-primary text-primary-foreground rounded-tr-sm shadow-md'
-          : 'rounded-tl-sm border border-border/80 bg-background text-foreground shadow-lg',
-      )}>
-        <div className="space-y-3">{renderedSegments}</div>
+        <div className={cn(
+          'max-w-[min(100%,56rem)] rounded-2xl px-4 py-3',
+          isUser
+            ? 'bg-primary text-primary-foreground rounded-tr-sm shadow-md'
+            : 'rounded-tl-sm border border-border/80 bg-background text-foreground shadow-lg',
+        )}>
+          <div className="space-y-3">{renderedSegments}</div>
+        </div>
       </div>
+
+      <span className={cn(
+        'mt-1 px-1 text-[11px] text-muted-foreground/70',
+        isUser ? 'self-end pr-9 text-right' : 'self-start pl-9 text-left',
+      )}>
+        {timeLabel}
+      </span>
     </div>
   )
 }

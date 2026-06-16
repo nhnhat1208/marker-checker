@@ -1,6 +1,10 @@
-# marker-checker
+<p align="center">
+  <img src="frontend/public/favicon.svg" alt="Marker Checker" width="80" height="80" />
+</p>
 
-Chat-first approval agent for a simple marker-checker workflow.
+<h1 align="center">Marker Checker</h1>
+
+<p align="center">Chat-first approval agent for a simple marker-checker workflow.</p>
 
 ## What It Does
 
@@ -122,6 +126,17 @@ make docker-build
 ## Web UI
 
 Chat-first web interface served from the same container. Enable by setting `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_SESSION_SECRET` in `deploy.env`. See [Web UI](docs/technical-design/web-ui.md).
+
+Current web chat supports:
+
+- Google-authenticated chat over WebSocket
+- structured draft confirmation with inline `Confirm` / `Discard`
+- approver review cards with inline `Approve` / `Reject` / `Need Info`
+- missing-info prompts rendered as normal draft-style cards with partial values preserved
+- VI / EN localization across the main chat surface
+- code/config diffs rendered in structured cards
+
+The same mark above (`frontend/public/favicon.svg`) powers the favicon and in-app `MarkerLogo`.
 
 WebSocket message types are defined in `agent/src/agent/contracts/ws.py` and auto-generated into `contracts/asyncapi.yaml` + `frontend/src/lib/generated/ws-contract.ts` via `make contracts`.
 

@@ -80,6 +80,7 @@ class RequestSummary(_RequestSummaryRequired, total=False):
     request_text: str
     structured_payload_json: str | None
     structured_payload: StructuredRequestPayload | None
+    impact_note: str | None
 
 
 class TimelineEvent(TypedDict):
@@ -121,6 +122,16 @@ class UiResponseRequest(TypedDict, total=False):
     review_status: str
     request_text: str
     structured_payload: StructuredRequestPayload | None
+    impact_note: str | None
+
+
+class UiResponseDraft(TypedDict, total=False):
+    requester_handle: str
+    approver_handle: str
+    target_label: str
+    change_from_summary: str
+    change_to_summary: str
+    parser: str
 
 
 class UiResponse(TypedDict, total=False):
@@ -130,6 +141,8 @@ class UiResponse(TypedDict, total=False):
     status: str
     request: UiResponseRequest
     requests: list[UiResponseRequest]
+    draft: UiResponseDraft
+    impact_note: str | None
 
 
 class CoordinatorResponse(_CoordinatorResponseRequired, total=False):
@@ -169,6 +182,7 @@ class ChangeRequest(BaseModel):
     target_label: str
     change_from_summary: str
     change_to_summary: str
+    impact_note: str | None = None
     request_text: str = ""
     business_reason: str | None = None
     structured_payload_json: str | None = None
@@ -254,6 +268,7 @@ class RequestRecord(BaseModel):
     request_id: str
     request_text: str = ""
     structured_payload_json: str | None = None
+    impact_note: str | None = None
     requester_name: str | None = None
     requester_handle: str = ""
     approver_name: str | None = None
@@ -286,7 +301,7 @@ class RequestRecord(BaseModel):
         return _coerce_enum(v, ReviewStatus, ReviewStatus.DRAFT)
 
     @field_validator(
-        "structured_payload_json", "requester_name", "approver_name",
+        "structured_payload_json", "impact_note", "requester_name", "approver_name",
         "target_object_type", "business_reason",
         "resolution_note", "resolved_by_name", "resolved_by_handle",
         "cancelled_by_handle", "cancellation_note",

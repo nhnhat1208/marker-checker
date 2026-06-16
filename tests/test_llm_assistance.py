@@ -20,6 +20,65 @@ class _NewRequestFakeBase:
 
 
 class LlmAssistanceTest(WorkflowTestCase):
+    def test_missing_fields_response_contains_partial_draft_in_ui_response(self) -> None:
+        class FakeInputAssistant(_NewRequestFakeBase):
+            def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:
+                return AssistedParseResult(
+                    parsed_request=ParsedRequest(
+                        target_label="sample-system",
+                        change_from_summary="current access",
+                        change_to_summary="",
+                        approver_handle="",
+                    ),
+                    parser_name="llm_assisted",
+                    guidance_message="Please add the target state and approver.",
+                    missing_fields=["change_to_summary", "approver_handle"],
+                )
+
+            def generate_clarification_message(
+                self,
+                *,
+                original_message: str,
+                missing_fields: list[str],
+                validation_errors: list[str],
+            ) -> str | None:
+                return "Please add the target state and approver."
+
+            def generate_confirmation_message(
+                self,
+                *,
+                parsed_request_summary: str,
+            ) -> str | None:
+                return None
+
+            def generate_status_summary(self, *, request_summary: str) -> str | None:
+                return None
+
+            def generate_history_summary(self, *, request_history: str) -> str | None:
+                return None
+
+            def generate_action_result_message(self, *, action_result: str) -> str | None:
+                return None
+
+        assisted_orchestrator = RequestCoordinator(
+            request_service=self.request_service,
+            audit_service=self.audit_service,
+            input_assistant=FakeInputAssistant(),
+        )
+
+        response = assisted_orchestrator.handle_requester_message(
+            text="request access for sample-system",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+
+        self.assertEqual(response["status"], "missing_fields")
+        self.assertEqual(response["ui_response"]["kind"], "missing_fields")
+        self.assertEqual(response["ui_response"]["draft"]["target_label"], "sample-system")
+        self.assertEqual(response["ui_response"]["draft"]["change_from_summary"], "current access")
+        self.assertEqual(response["ui_response"]["draft"]["change_to_summary"], "")
+        self.assertEqual(response["ui_response"]["draft"]["approver_handle"], "")
+
     def test_llm_input_assistance_can_build_draft(self) -> None:
         class FakeInputAssistant(_NewRequestFakeBase):
             def assist_request_text(self, text: str, user_context: str | None = None) -> AssistedParseResult:

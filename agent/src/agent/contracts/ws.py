@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from agent.domain.models import CodeFormat, RequestMode
-
 if TYPE_CHECKING:
-    from starlette.websockets import WebSocket
+    from agent.domain.models import CodeFormat, RequestMode
 
 
 class StructuredCodeSection(BaseModel):
@@ -50,6 +48,20 @@ class UiRequestSummary(BaseModel):
     review_status: str
     request_text: str
     structured_payload: StructuredRequestPayload | None
+    impact_note: str | None = None
+
+
+class UiDraftSummary(BaseModel):
+    """Summary of a pending draft awaiting confirm/discard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requester_handle: str
+    approver_handle: str
+    target_label: str
+    change_from_summary: str
+    change_to_summary: str
+    parser: str
 
 
 class UiResponse(BaseModel):
@@ -63,6 +75,10 @@ class UiResponse(BaseModel):
     status: str | None = None
     request: UiRequestSummary | None = None
     requests: list[UiRequestSummary] | None = None
+    draft: UiDraftSummary | None = None
+    impact_note: str | None = None
+    missing_fields: list[str] | None = None
+    guidance_message: str | None = None
 
 
 # ── Client → Server ───────────────────────────────────────────────────────────
@@ -86,12 +102,14 @@ class WsStructuredMessage(BaseModel):
 
 
 class WsActionMessage(BaseModel):
-    """User confirms or discards a pending draft."""
+    """User performs a structured chat action."""
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["action"]
-    op: Literal["confirm", "discard"]
+    op: Literal["confirm", "discard", "approve", "reject", "needinfo"]
+    request_id: str | None = None
+    note: str | None = None
 
 
 # ── Server → Client ───────────────────────────────────────────────────────────
@@ -135,8 +153,8 @@ WsServerMessage = Annotated[
     Field(discriminator="type"),
 ]
 
-_WS_CLIENT_ADAPTER = TypeAdapter(WsClientMessage)
-_WS_SERVER_ADAPTER = TypeAdapter(WsServerMessage)
+_WS_CLIENT_ADAPTER: TypeAdapter[WsClientMessage] = TypeAdapter(WsClientMessage)
+_WS_SERVER_ADAPTER: TypeAdapter[WsServerMessage] = TypeAdapter(WsServerMessage)
 
 
 def parse_ws_client_message(payload: object) -> WsTextMessage | WsStructuredMessage | WsActionMessage:

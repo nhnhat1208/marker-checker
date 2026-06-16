@@ -39,6 +39,10 @@ class RequestQueryService:
     def lookup_request(self, request_id: str, actor_handle: str) -> CoordinatorResponse:
         try:
             request = self._request_service.get_request_summary(request_id)
+            request = _request_summary_copy(
+                request,
+                impact_note=_estimate_impact_note(self._input_assistant, request),
+            )
         except RequestNotFoundError as exc:
             return {"status": ResponseStatus.ERROR, "message": str(exc)}
 
@@ -80,7 +84,10 @@ class RequestQueryService:
     def search_by_target(self, target_name: str) -> CoordinatorResponse:
         if not target_name:
             return {"status": ResponseStatus.ERROR, "message": "No target name provided."}
-        requests = self._request_service.search_by_target_label(target_name)
+        requests = _with_impact_notes(
+            self._input_assistant,
+            self._request_service.search_by_target_label(target_name),
+        )
         return {
             "status": ResponseStatus.OK,
             "message": _format_request_list(
@@ -93,7 +100,10 @@ class RequestQueryService:
         }
 
     def list_requester_pending(self, requester_handle: str) -> CoordinatorResponse:
-        requests = self._request_service.list_requester_pending_summaries(requester_handle)
+        requests = _with_impact_notes(
+            self._input_assistant,
+            self._request_service.list_requester_pending_summaries(requester_handle),
+        )
         return {
             "status": ResponseStatus.OK,
             "message": _format_request_list(
@@ -106,7 +116,10 @@ class RequestQueryService:
         }
 
     def list_pending_approvals(self, approver_handle: str) -> CoordinatorResponse:
-        requests = self._request_service.list_approver_pending_summaries(approver_handle)
+        requests = _with_impact_notes(
+            self._input_assistant,
+            self._request_service.list_approver_pending_summaries(approver_handle),
+        )
         return {
             "status": ResponseStatus.OK,
             "message": _format_request_list(
@@ -196,6 +209,50 @@ def _request_ui_response(request: RequestSummary) -> UiResponse:
         "body": " · ".join(body_parts) if body_parts else None,
         "request": request,
     }
+
+
+def _request_summary_copy(request: RequestSummary, *, impact_note: str | None) -> RequestSummary:
+    copied = dict(request)
+    if impact_note and not str(copied.get("impact_note", "")).strip():
+        copied["impact_note"] = impact_note
+    return copied
+
+
+def _estimate_impact_note(
+    assistant: RequestInputAssistant | None,
+    request: RequestSummary,
+) -> str | None:
+    if not assistant:
+        return None
+    existing = str(request.get("impact_note", "")).strip()
+    if existing:
+        return existing
+    if (
+        not request.get("target_label")
+        and not request.get("change_from_summary")
+        and not request.get("change_to_summary")
+    ):
+        return None
+    return assistant.generate_impact_note(
+        target_label=request.get("target_label", ""),
+        change_from=request.get("change_from_summary", ""),
+        change_to=request.get("change_to_summary", ""),
+    )
+
+
+def _with_impact_notes(
+    assistant: RequestInputAssistant | None,
+    requests: list[RequestSummary],
+) -> list[RequestSummary]:
+    if not assistant:
+        return requests
+    return [
+        _request_summary_copy(
+            request,
+            impact_note=_estimate_impact_note(assistant, request),
+        )
+        for request in requests
+    ]
 
 
 def _request_list_ui_response(requests: list[RequestSummary], *, title: str) -> UiResponse:

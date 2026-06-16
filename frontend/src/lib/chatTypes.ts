@@ -1,6 +1,7 @@
 import type {
   StructuredCodeSection,
   StructuredRequestPayload,
+  UiDraftSummary,
   UiRequestSummary,
   UiResponse,
   WsActionMessage,
@@ -14,6 +15,7 @@ import type {
 export type {
   StructuredCodeSection,
   StructuredRequestPayload,
+  UiDraftSummary,
   UiRequestSummary,
   UiResponse,
   WsActionMessage,

@@ -110,6 +110,8 @@ Defined in `agent/src/agent/contracts/ws.py`, auto-generated to `frontend/src/li
 
 `WsTypingMessage` is sent before the agent starts processing (shows typing indicator). `WsDoneMessage.ui_response` carries a structured `UiResponse` for the frontend to render request cards, status badges, etc. The draft confirmation card is shown when `ui_response.kind == "confirmation_required"`.
 
+For missing-field flows, `ui_response.kind == "missing_fields"` may also include a partial `draft` snapshot. The frontend uses that partial draft to render the same draft-style card shape with missing values highlighted inline, instead of switching to a separate diagnostic layout.
+
 ---
 
 ## Progress
@@ -132,24 +134,26 @@ Defined in `agent/src/agent/contracts/ws.py`, auto-generated to `frontend/src/li
 
 - [ ] Sidebar (collapsed on mobile) + chat column layout — currently single-column only
 - [x] Message list — auto-scroll to latest message
-- [ ] Timestamps on each message bubble
+- [x] Timestamps on each message bubble
 - [x] Message bubbles: user (right, accent) / agent (left, neutral) with agent avatar
-- [ ] User avatar / initials on user bubble
+- [x] User avatar / initials on user bubble
 - [x] Typing indicator (3-dot animation) while waiting for agent response
 - [x] Code blocks in messages — syntax highlighting + side-by-side diff view
 - [ ] Full Markdown rendering — bullets, bold, italic, headers (currently only code blocks; other markdown renders as raw text)
-- [ ] **Confirm / Discard buttons on draft card** — `StructuredAgentBubble` renders the request card but has no action buttons; user must type `/confirm` or `/discard` manually
+- [x] **Confirm / Discard buttons on draft card** — draft confirmation now renders as a structured card with direct action buttons wired to WS draft actions
 - [x] Status badge inline — APPROVED / REJECTED / NEEDS_INFO / PENDING color-coded
-- [ ] Missing fields highlight — no dedicated UI when the agent requests additional info
+- [x] Need-info guidance — when the agent asks for more info, the UI shows a short hint plus a normal draft-style card with partial values preserved and missing fields highlighted inline
 - [x] Auto-reconnect with exponential backoff (1s → 30s); connection status dot in header
 - [x] `Enter` to send, `Shift+Enter` for newline (spec said `Cmd+Enter` but `Enter` is standard chat UX)
 - [x] Google profile in header: avatar + name + theme picker + language toggle + logout dropdown
+- [x] Card-level VI / EN copy — draft / request / need-info cards, action labels, status labels, and paging/search copy are routed through `i18next`
 
 ### Phase 2 — Request Dashboard
 
 - [ ] Sidebar navigation: **Chat** / **My Requests** / **Pending Approvals**
 - [ ] **My Requests** page: table with request_id, target, change summary, status badge, updated_at; filter tabs (All / Pending / Resolved); search by target label; click row → slide-out detail panel; poll every 10s
 - [ ] **Pending Approvals** page: requests waiting for the current user's decision; inline Approve / Reject / Need Info buttons; Reject and Need Info open a note modal; action calls `POST /api/requests/:id/action`
+  Phase 1 note: chat review cards now expose inline Approve / Reject / Need Info actions for the current approver.
 - [ ] **Request Detail panel**: full request fields, audit trail timeline, resolved by / at, copy request_id button
 
 ### Phase 3 — Polish
@@ -187,7 +191,8 @@ marker-checker/
 │   │   ├── i18n/
 │   │   │   └── index.ts                     ← i18next setup (i18next-http-backend)
 │   │   ├── lib/
-│   │   │   ├── chatTypes.ts                 ← local chat message types
+│   │   │   ├── chatTypes.ts                 ← generated WS contract re-exports + chat aliases
+│   │   │   ├── chat-ui/                     ← structured bubble constants, response derivation, message transforms
 │   │   │   ├── codeDiff.ts                  ← code diff helpers
 │   │   │   ├── utils.ts                     ← shadcn/ui cn() utility
 │   │   │   └── generated/
@@ -257,3 +262,21 @@ To disable: remove those vars — no change to `runtime.yaml` needed.
 - Email notifications
 - Audit log export (CSV / PDF)
 - Linking web identity to Telegram identity
+
+---
+
+## Current UX Notes
+
+- The structured agent bubble now has three primary card modes:
+  - draft confirmation card
+  - request status / review card
+  - missing-info card rendered with the same draft-card visual language
+- Missing info is no longer displayed as a separate inspector/debug panel. Instead, the frontend renders the partial draft snapshot and marks unresolved fields inline in the same card structure.
+- The “Add missing details” action inserts a guided fill-in template into the composer and hides once the user has already replied after that missing-info prompt.
+- VI / EN localization currently covers the main chat surface:
+  - header
+  - empty state
+  - composer
+  - draft / request / missing-info cards
+  - inline action buttons
+  - search and paging controls inside structured bubbles

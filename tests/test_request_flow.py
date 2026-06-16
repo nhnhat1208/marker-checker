@@ -6,6 +6,35 @@ from tests.workflow_test_support import WorkflowTestCase
 
 
 class RequestFlowTest(WorkflowTestCase):
+    def test_draft_ui_response_and_bare_confirm_discard(self) -> None:
+        draft_response = self.orchestrator.handle_requester_message(
+            text="for sample-object, change from disabled to enabled, ask @checker to approve",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        self.assertEqual(draft_response["status"], "confirmation_required")
+        self.assertEqual(draft_response["ui_response"]["kind"], "confirmation_required")
+        self.assertEqual(draft_response["ui_response"]["draft"]["approver_handle"], "@checker")
+
+        discard_response = self.orchestrator.handle_requester_message(
+            text="discard",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        self.assertEqual(discard_response["status"], "ok")
+
+        self.orchestrator.handle_requester_message(
+            text="for sample-object, change from disabled to enabled, ask @checker to approve",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        confirm_response = self.orchestrator.handle_requester_message(
+            text="confirm",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        self.assertEqual(confirm_response["status"], "submitted")
+
     def test_submit_approve_lookup_and_history(self) -> None:
         draft_response = self.orchestrator.handle_requester_message(
             text="for sample-object, change from disabled to enabled, ask @checker to approve",
@@ -124,3 +153,39 @@ class RequestFlowTest(WorkflowTestCase):
         record = self.request_service.get_request(submit_response["request"]["request_id"])
         self.assertEqual(record.origin_channel_id, "requester@example.com")
         self.assertEqual(record.approver_handle, "annie@example.com")
+
+    def test_web_self_approval_does_not_emit_requester_notification(self) -> None:
+        requester_notifications: list[tuple[str, str]] = []
+        self.orchestrator.set_requester_notification_callback(
+            lambda channel_id, message: requester_notifications.append((channel_id, message))
+        )
+
+        web_source = MessageSource(
+            source_channel="web",
+            channel_id="requester@example.com",
+            thread_id="requester@example.com",
+        )
+        requester = ActorContext(name="Requester One", handle="requester@example.com")
+
+        self.orchestrator.handle_requester_message(
+            text="for api-gateway, change from disabled to enabled, ask requester@example.com to approve",
+            requester=requester,
+            source=web_source,
+        )
+        submit_response = self.orchestrator.handle_requester_message(
+            text="/confirm",
+            requester=requester,
+            source=web_source,
+        )
+
+        approve_response = self.orchestrator.handle_approver_action(
+            actor=requester,
+            action=WorkflowAction(
+                action=Operation.APPROVE,
+                request_id=submit_response["request"]["request_id"],
+                note="looks good",
+            ),
+            source=web_source,
+        )
+        self.assertEqual(approve_response["status"], "ok")
+        self.assertEqual(requester_notifications, [])

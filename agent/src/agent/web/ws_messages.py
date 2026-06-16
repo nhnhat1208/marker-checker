@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from agent.contracts.ws import (
     StructuredRequestPayload,
+    UiDraftSummary,
     UiRequestSummary,
     UiResponse,
     WsDoneMessage,
@@ -37,13 +38,18 @@ def build_request_ui_response(
     title: str | None = None,
     body: str | None = None,
     kind: str = "request_status",
+    impact_note: str | None = None,
 ) -> UiResponse:
+    request_summary = to_ui_request_summary(request)
+    if impact_note:
+        request_summary = request_summary.model_copy(update={"impact_note": impact_note})
     return UiResponse(
         kind=kind,
         title=title,
         body=body,
         status=str(request.get("review_status", "")),
-        request=to_ui_request_summary(request),
+        request=request_summary,
+        impact_note=impact_note,
     )
 
 
@@ -55,14 +61,28 @@ def extract_ui_response(response: object) -> UiResponse | None:
         coerced = _coerce_ui_response(candidate)
         if coerced is not None:
             return coerced
+    missing_fields = response.get("missing_fields")
+    if isinstance(missing_fields, list) and all(isinstance(item, str) for item in missing_fields):
+        message = str(response.get("message") or "").strip()
+        draft = response.get("draft")
+        return UiResponse(
+            kind="missing_fields",
+            status=str(response.get("status", "")),
+            body=message or None,
+            missing_fields=[item.strip() for item in missing_fields if item.strip()],
+            guidance_message=message or None,
+            draft=to_ui_draft_summary(draft) if isinstance(draft, dict) else None,
+        )
     request = response.get("request")
     if isinstance(request, dict):
         message = str(response.get("summary_message") or response.get("message") or "").strip()
+        request_summary = to_ui_request_summary(request)
         return UiResponse(
             kind="request_status",
             status=str(request.get("review_status", response.get("status", ""))),
             body=message or None,
-            request=to_ui_request_summary(request),
+            request=request_summary,
+            impact_note=request_summary.impact_note,
         )
     requests = response.get("requests")
     if isinstance(requests, list) and all(isinstance(item, dict) for item in requests):
@@ -95,6 +115,18 @@ def to_ui_request_summary(request: dict[str, object]) -> UiRequestSummary:
         review_status=str(request.get("review_status", "")),
         request_text=str(request.get("request_text", "")),
         structured_payload=payload,
+        impact_note=str(request.get("impact_note", "")).strip() or None,
+    )
+
+
+def to_ui_draft_summary(draft: dict[str, object]) -> UiDraftSummary:
+    return UiDraftSummary(
+        requester_handle=str(draft.get("requester_handle", "")),
+        approver_handle=str(draft.get("approver_handle", "")),
+        target_label=str(draft.get("target_label", "")),
+        change_from_summary=str(draft.get("change_from_summary", "")),
+        change_to_summary=str(draft.get("change_to_summary", "")),
+        parser=str(draft.get("parser", "")),
     )
 
 
@@ -105,6 +137,8 @@ def _serialize(response: object) -> object:
 def _coerce_ui_response(candidate: dict[str, object]) -> UiResponse | None:
     request = candidate.get("request")
     requests = candidate.get("requests")
+    draft = candidate.get("draft")
+    impact_note = candidate.get("impact_note")
 
     payload: dict[str, object] = {
         "kind": str(candidate.get("kind", "")),
@@ -119,6 +153,16 @@ def _coerce_ui_response(candidate: dict[str, object]) -> UiResponse | None:
         payload["request"] = to_ui_request_summary(request)
     if isinstance(requests, list) and all(isinstance(item, dict) for item in requests):
         payload["requests"] = [to_ui_request_summary(item) for item in requests]
+    if isinstance(draft, dict):
+        payload["draft"] = to_ui_draft_summary(draft)
+    if isinstance(impact_note, str):
+        payload["impact_note"] = impact_note.strip() or None
+    missing_fields = candidate.get("missing_fields")
+    if isinstance(missing_fields, list) and all(isinstance(item, str) for item in missing_fields):
+        payload["missing_fields"] = [item.strip() for item in missing_fields if item.strip()]
+    guidance_message = candidate.get("guidance_message")
+    if isinstance(guidance_message, str):
+        payload["guidance_message"] = guidance_message.strip() or None
 
     try:
         return UiResponse.model_validate(payload)

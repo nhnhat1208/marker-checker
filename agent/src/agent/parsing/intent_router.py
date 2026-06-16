@@ -37,6 +37,14 @@ class FreeformIntentRouter:
         rf"^(?:(?:/)?cancel|cancel\s+request)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
         re.IGNORECASE,
     )
+    _APPROVE_PATTERN = re.compile(
+        rf"^(?:(?:/)?approve)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
+        re.IGNORECASE,
+    )
+    _REJECT_PATTERN = re.compile(
+        rf"^(?:(?:/)?reject)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
+        re.IGNORECASE,
+    )
     _NEEDINFO_PATTERN = re.compile(
         rf"^(?:(?:/)?needinfo|need\s+info|need\s+more\s+info|ask\s+for\s+more\s+info)\s+{_REQUEST_ID_PATTERN}(?:\s+(?P<note>.+))?\s*$",
         re.IGNORECASE,
@@ -72,6 +80,16 @@ class FreeformIntentRouter:
         (_CANCEL_PATTERN,
          lambda m: RoutedIntent(
              operation=Operation.CANCEL, request_id=m.group("request_id"),
+             note=(m.group("note") or "").strip(),
+         )),
+        (_APPROVE_PATTERN,
+         lambda m: RoutedIntent(
+             operation=Operation.APPROVE, request_id=m.group("request_id"),
+             note=(m.group("note") or "").strip(),
+         )),
+        (_REJECT_PATTERN,
+         lambda m: RoutedIntent(
+             operation=Operation.REJECT, request_id=m.group("request_id"),
              note=(m.group("note") or "").strip(),
          )),
         (_NEEDINFO_PATTERN,

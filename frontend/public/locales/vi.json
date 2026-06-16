@@ -9,7 +9,12 @@
     "headline": "Tôi có thể giúp gì?",
     "subtitle": "Mô tả yêu cầu thay đổi bằng ngôn ngữ tự nhiên — tôi sẽ chuyển đến người duyệt phù hợp.",
     "tip": "Gõ /help để xem tất cả lệnh",
-    "all": "Tất cả"
+    "all": "Tất cả",
+    "search": "Tìm mẫu",
+    "no_results": "Không có mẫu nào khớp với tìm kiếm.",
+    "prev": "Trước",
+    "next": "Sau",
+    "page_info": "Trang {{current}} / {{total}}"
   },
   "composer": {
     "tab_message": "Tin nhắn",
@@ -17,14 +22,90 @@
     "placeholders": [
       "Mô tả yêu cầu thay đổi…",
       "VD: bật tính năng X trên api-gateway, nhờ annie@example.com duyệt",
-      "VD: đổi timeout nginx từ 30s lên 60s, nhờ @ops xem xét",
+      "VD: đổi timeout nginx từ 30s lên 60s, nhờ ops@example.com xem xét",
       "Gõ / để xem lệnh"
     ],
     "placeholder_connecting": "Đang kết nối…",
     "describe": "Mô tả thay đổi…",
-    "approver": "Người duyệt",
-    "approver_placeholder": "email hoặc @handle",
+    "approver": "Email người duyệt",
+    "approver_placeholder": "VD: annie@example.com",
     "code_change": "Thay đổi code"
+  },
+  "missing_info": {
+    "title": "Cần thêm thông tin",
+    "badge": "Cần thêm",
+    "single": "Vui lòng thêm thông tin này để tiếp tục",
+    "multiple": "Vui lòng thêm các thông tin này để tiếp tục",
+    "guidance": "Cần bổ sung {{fields}} để tiếp tục.",
+    "action": "Bổ sung thông tin",
+    "summary_title": "Tình trạng hiện tại",
+    "status_missing": "Còn thiếu",
+    "status_ready": "Đã có",
+    "placeholder": "Chưa có thông tin",
+    "fields": {
+      "target_label": "mục tiêu hoặc dịch vụ",
+      "change_from_summary": "trạng thái hiện tại",
+      "change_to_summary": "trạng thái mới",
+      "approver_handle": "email người duyệt",
+      "request_text": "mô tả yêu cầu",
+      "structured_payload": "chi tiết yêu cầu"
+    }
+  },
+  "change_summary": {
+    "current": "Trạng thái hiện tại",
+    "proposed": "Trạng thái đề xuất"
+  },
+  "chat_card": {
+    "request_fallback_title": "Yêu cầu",
+    "requests_title": "Danh sách yêu cầu",
+    "draft_ready_title": "Bản nháp đã sẵn sàng",
+    "draft_ready_body": "Kiểm tra các thông tin đã tách được rồi xác nhận để chuyển yêu cầu đi duyệt.",
+    "draft_badge": "Bản nháp",
+    "draft_parser_llm": "LLM hỗ trợ",
+    "needs_details_badge": "Thiếu thông tin",
+    "meta_requester": "Người gửi",
+    "meta_approver": "Người duyệt",
+    "meta_target": "Mục tiêu",
+    "description": "Mô tả",
+    "impact_note": "Gợi ý từ LLM",
+    "confirm": "Xác nhận",
+    "discard": "Bỏ nháp",
+    "approve": "Duyệt",
+    "reject": "Từ chối",
+    "need_info": "Cần thêm thông tin",
+    "reject_reason": "Lý do từ chối",
+    "need_info_prompt": "Nội dung cần bổ sung",
+    "reject_placeholder": "Cho biết vì sao yêu cầu này nên bị từ chối",
+    "need_info_placeholder": "Nêu rõ thông tin bạn cần thêm",
+    "send_rejection": "Gửi từ chối",
+    "request_info": "Yêu cầu bổ sung",
+    "cancel": "Hủy",
+    "search_requests": "Tìm yêu cầu…",
+    "no_results": "Không có kết quả cho \"{{query}}\"",
+    "range_info": "{{start}}–{{end}} / {{total}}",
+    "page_info": "{{current}} / {{total}}",
+    "pending": {
+      "draft_confirm": "Đang xác nhận bản nháp...",
+      "draft_discard": "Đang bỏ bản nháp...",
+      "review_approve": "Đang áp dụng duyệt...",
+      "review_reject": "Đang gửi từ chối...",
+      "review_need_info": "Đang yêu cầu thêm thông tin..."
+    },
+    "status": {
+      "pending": "Đang chờ",
+      "in_review": "Đang xem xét",
+      "approved": "Đã duyệt",
+      "rejected": "Đã từ chối",
+      "cancelled": "Đã hủy",
+      "error": "Lỗi",
+      "needs_info": "Cần thêm thông tin"
+    }
+  },
+  "code_change": {
+    "before_block": "Trước",
+    "after_block": "Sau",
+    "before_state": "Trước thay đổi",
+    "after_state": "Sau thay đổi"
   },
   "lang": {
     "label": "Ngôn ngữ",

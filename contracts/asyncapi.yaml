@@ -59,7 +59,7 @@ components:
       payload:
         $ref: '#/components/schemas/WsStructuredMessage'
     ActionMessage:
-      summary: User confirms or discards a pending draft.
+      summary: User performs a structured chat action.
       payload:
         $ref: '#/components/schemas/WsActionMessage'
     TypingMessage:
@@ -156,7 +156,7 @@ components:
       type: object
     WsActionMessage:
       additionalProperties: false
-      description: User confirms or discards a pending draft.
+      description: User performs a structured chat action.
       properties:
         type:
           const: action
@@ -165,7 +165,20 @@ components:
           enum:
           - confirm
           - discard
+          - approve
+          - reject
+          - needinfo
           type: string
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
       required:
       - type
       - op
@@ -179,6 +192,30 @@ components:
           type: string
       required:
       - type
+      type: object
+    UiDraftSummary:
+      additionalProperties: false
+      description: Summary of a pending draft awaiting confirm/discard.
+      properties:
+        requester_handle:
+          type: string
+        approver_handle:
+          type: string
+        target_label:
+          type: string
+        change_from_summary:
+          type: string
+        change_to_summary:
+          type: string
+        parser:
+          type: string
+      required:
+      - requester_handle
+      - approver_handle
+      - target_label
+      - change_from_summary
+      - change_to_summary
+      - parser
       type: object
     UiRequestSummary:
       additionalProperties: false
@@ -204,6 +241,11 @@ components:
           anyOf:
           - $ref: '#/components/schemas/StructuredRequestPayload'
           - type: 'null'
+        impact_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
       required:
       - request_id
       - requester_handle
@@ -246,6 +288,16 @@ components:
           - items:
               $ref: '#/components/schemas/UiRequestSummary'
             type: array
+          - type: 'null'
+          default: null
+        draft:
+          anyOf:
+          - $ref: '#/components/schemas/UiDraftSummary'
+          - type: 'null'
+          default: null
+        impact_note:
+          anyOf:
+          - type: string
           - type: 'null'
           default: null
       required:

@@ -10,6 +10,7 @@ from agent.contracts.ws import (
     dump_ws_server_message,
     parse_ws_client_message,
 )
+from agent.web.ws_messages import build_request_ui_response, done_payload
 
 
 class WsContractTest(unittest.TestCase):
@@ -48,6 +49,7 @@ class WsContractTest(unittest.TestCase):
                 response={"status": "ok"},
                 ui_response=UiResponse(
                     kind="request_status",
+                    impact_note="LLM impact note",
                     request=UiRequestSummary(
                         request_id="REQ-123",
                         requester_handle="@alice",
@@ -67,6 +69,66 @@ class WsContractTest(unittest.TestCase):
         self.assertIn("ui_response", payload)
         self.assertNotIn("title", payload["ui_response"])
         self.assertEqual(payload["ui_response"]["request"]["request_id"], "REQ-123")
+        self.assertEqual(payload["ui_response"]["impact_note"], "LLM impact note")
+
+    def test_build_request_ui_response_copies_impact_note_to_request(self) -> None:
+        response = build_request_ui_response(
+            {
+                "request_id": "REQ-123",
+                "requester_handle": "@alice",
+                "approver_handle": "@ops",
+                "target_label": "nginx-config",
+                "change_from_summary": "30s",
+                "change_to_summary": "60s",
+                "review_status": "submitted",
+                "request_text": "change timeout",
+            },
+            impact_note="Increase timeout before traffic spike.",
+        )
+
+        assert response.request is not None
+        self.assertEqual(response.impact_note, "Increase timeout before traffic spike.")
+        self.assertEqual(response.request.impact_note, "Increase timeout before traffic spike.")
+
+    def test_missing_fields_response_becomes_ui_response(self) -> None:
+        payload = dump_ws_server_message(
+            done_payload(
+                {
+                    "status": "missing_fields",
+                    "message": "Who should approve this deployment?",
+                    "missing_fields": ["approver_handle", "target_label"],
+                }
+            )
+        )
+
+        self.assertEqual(payload["type"], "done")
+        self.assertEqual(payload["ui_response"]["kind"], "missing_fields")
+        self.assertEqual(payload["ui_response"]["missing_fields"], ["approver_handle", "target_label"])
+        self.assertEqual(payload["ui_response"]["guidance_message"], "Who should approve this deployment?")
+
+    def test_missing_fields_response_preserves_partial_draft(self) -> None:
+        payload = dump_ws_server_message(
+            done_payload(
+                {
+                    "status": "missing_fields",
+                    "message": "Please fill the missing fields.",
+                    "missing_fields": ["approver_handle"],
+                    "draft": {
+                        "requester_handle": "alice@example.com",
+                        "approver_handle": "",
+                        "target_label": "api-gateway",
+                        "change_from_summary": "disabled",
+                        "change_to_summary": "enabled",
+                        "parser": "llm_assisted",
+                    },
+                }
+            )
+        )
+
+        self.assertEqual(payload["ui_response"]["kind"], "missing_fields")
+        self.assertEqual(payload["ui_response"]["draft"]["target_label"], "api-gateway")
+        self.assertEqual(payload["ui_response"]["draft"]["change_from_summary"], "disabled")
+        self.assertEqual(payload["ui_response"]["draft"]["change_to_summary"], "enabled")
 
     def test_ws_contract_declares_all_message_types(self) -> None:
         from agent.contracts.ws import WS_CONTRACT

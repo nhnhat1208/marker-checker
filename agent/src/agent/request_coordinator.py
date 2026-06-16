@@ -39,6 +39,7 @@ from agent.services.request_service import (
     RequestService,
 )
 from agent.services.workflow_transitions import InvalidTransitionError
+from agent.web.ws_messages import build_request_ui_response
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -119,8 +120,10 @@ class RequestCoordinator:
         if self._memory:
             self._memory.log_user_message(requester.handle, normalized)
 
-        if normalized.lower() == "/confirm":
+        if normalized.lower() in {"/confirm", "confirm"}:
             return self._confirm_pending_draft(requester=requester)
+        if normalized.lower() in {"/discard", "discard"}:
+            return self.discard_draft(requester.handle)
 
         routed = self._intent_router.route(normalized)
         if routed:
@@ -197,7 +200,11 @@ class RequestCoordinator:
             actor_handle=actor.handle,
             note=action.note,
         )
-        if self._notify_requester and record.origin_channel_id:
+        same_web_actor = (
+            record.requester_handle.strip().casefold() == actor.handle.strip().casefold()
+            and (record.origin_channel_id or "").strip().casefold() == actor.handle.strip().casefold()
+        )
+        if self._notify_requester and record.origin_channel_id and not same_web_actor:
             requester_msg = _format_requester_notification(
                 action=action.action,
                 request_id=record.request_id,
@@ -238,11 +245,21 @@ class RequestCoordinator:
                 },
             }
 
+        impact_note: str | None = None
+        approver_handle = str(structured_payload.get("approver", "")).strip()
+        if approver_handle and self._input_assistant:
+            impact_note = self._input_assistant.generate_impact_note(
+                target_label=_derive_target_label(structured_payload),
+                change_from=_summarize_structured_section(structured_payload, "before"),
+                change_to=_summarize_structured_section(structured_payload, "after"),
+            )
+
         change = ChangeRequest(
             approver_handle=structured_payload["approver"],
             target_label=_derive_target_label(structured_payload),
             change_from_summary=_summarize_structured_section(structured_payload, "before"),
             change_to_summary=_summarize_structured_section(structured_payload, "after"),
+            impact_note=impact_note,
             request_text=request_text,
             business_reason=None,
             structured_payload_json=json.dumps(
@@ -263,20 +280,6 @@ class RequestCoordinator:
                 approver=request_payload.get("approver_handle", ""),
             )
 
-        impact_note: str | None = None
-        approver_handle = str(request_payload.get("approver_handle", "")).strip()
-        if approver_handle and self._input_assistant:
-            impact_note = self._input_assistant.generate_impact_note(
-                target_label=change.target_label,
-                change_from=change.change_from_summary,
-                change_to=change.change_to_summary,
-            )
-        approver_context = (
-            self._memory.get_approver_patterns(approver_handle)
-            if self._memory and approver_handle else None
-        )
-        if approver_context:
-            impact_note = f"{impact_note}\n{approver_context}" if impact_note else approver_context
         if approver_handle and self._notify_approver:
             self._notify_approver(request_payload, impact_note)
 
@@ -296,13 +299,13 @@ class RequestCoordinator:
             "status": ResponseStatus.SUBMITTED,
             "message": message,
             "request": request_payload,
-            "ui_response": {
-                "kind": "request_submitted",
-                "title": title,
-                "body": body,
-                "status": request_payload["review_status"],
-                "request": _to_ui_request(request_payload),
-            },
+            "ui_response": build_request_ui_response(
+                request_payload,
+                kind="request_submitted",
+                title=title,
+                body=body,
+                impact_note=impact_note,
+            ).model_dump(mode="json", exclude_none=True),
         }
 
     def handle_resubmission(
@@ -329,6 +332,7 @@ class RequestCoordinator:
                     target_label=parsed.target_label,
                     change_from_summary=parsed.change_from_summary,
                     change_to_summary=parsed.change_to_summary,
+                    impact_note=existing.impact_note,
                     business_reason=None,
                     request_text=text,
                 ),
@@ -389,6 +393,14 @@ class RequestCoordinator:
                 "message": "No pending draft found. Send a request message first.",
             }
 
+        impact_note: str | None = None
+        if self._input_assistant:
+            impact_note = self._input_assistant.generate_impact_note(
+                target_label=draft.parsed_request.target_label,
+                change_from=draft.parsed_request.change_from_summary,
+                change_to=draft.parsed_request.change_to_summary,
+            )
+
         record = self._request_service.create_request(
             requester=requester,
             change=ChangeRequest(
@@ -396,6 +408,7 @@ class RequestCoordinator:
                 target_label=draft.parsed_request.target_label,
                 change_from_summary=draft.parsed_request.change_from_summary,
                 change_to_summary=draft.parsed_request.change_to_summary,
+                impact_note=impact_note,
                 business_reason=draft.business_reason,
                 request_text=draft.request_text,
             ),
@@ -409,19 +422,6 @@ class RequestCoordinator:
                 target=draft.parsed_request.target_label,
                 approver=draft.parsed_request.approver_handle,
             )
-        impact_note: str | None = None
-        if self._input_assistant:
-            impact_note = self._input_assistant.generate_impact_note(
-                target_label=draft.parsed_request.target_label,
-                change_from=draft.parsed_request.change_from_summary,
-                change_to=draft.parsed_request.change_to_summary,
-            )
-        approver_context = (
-            self._memory.get_approver_patterns(draft.parsed_request.approver_handle)
-            if self._memory else None
-        )
-        if approver_context:
-            impact_note = f"{impact_note}\n{approver_context}" if impact_note else approver_context
         if self._notify_approver and draft.parsed_request.approver_handle.strip():
             self._notify_approver(payload, impact_note)
 
@@ -538,6 +538,14 @@ class RequestCoordinator:
             else None
         )
         self._drafts.set_partial(requester.handle, outcome.text, outcome.parsed)
+        draft_payload = {
+            "requester_handle": requester.handle,
+            "approver_handle": outcome.parsed.approver_handle,
+            "target_label": outcome.parsed.target_label,
+            "change_from_summary": outcome.parsed.change_from_summary,
+            "change_to_summary": outcome.parsed.change_to_summary,
+            "parser": outcome.parser_name,
+        }
         return {
             "status": ResponseStatus.MISSING_FIELDS,
             "message": (
@@ -546,8 +554,26 @@ class RequestCoordinator:
                 or f"Missing fields: {', '.join(missing_fields)}"
             ),
             "missing_fields": missing_fields,
+            "draft": draft_payload,
             "parser": outcome.parser_name,
             "parser_metadata": _assistant_metadata(outcome.assisted_result),
+            "ui_response": {
+                "kind": "missing_fields",
+                "title": "Need more info",
+                "body": (
+                    clarification
+                    or (outcome.assisted_result.guidance_message if outcome.assisted_result else None)
+                    or f"Missing fields: {', '.join(missing_fields)}"
+                ),
+                "status": ResponseStatus.MISSING_FIELDS,
+                "missing_fields": missing_fields,
+                "guidance_message": (
+                    clarification
+                    or (outcome.assisted_result.guidance_message if outcome.assisted_result else None)
+                    or f"Missing fields: {', '.join(missing_fields)}"
+                ),
+                "draft": draft_payload,
+            },
         }
 
     def _draft_confirmation_response(
@@ -582,6 +608,20 @@ class RequestCoordinator:
                 "parser": outcome.parser_name,
                 "parser_metadata": _assistant_metadata(outcome.assisted_result),
             },
+            "ui_response": {
+                "kind": "confirmation_required",
+                "title": "Draft ready to submit",
+                "body": "Review the extracted fields, then confirm to route the request.",
+                "status": ResponseStatus.CONFIRMATION_REQUIRED,
+                "draft": {
+                    "requester_handle": requester.handle,
+                    "approver_handle": draft.parsed_request.approver_handle,
+                    "target_label": draft.parsed_request.target_label,
+                    "change_from_summary": draft.parsed_request.change_from_summary,
+                    "change_to_summary": draft.parsed_request.change_to_summary,
+                    "parser": outcome.parser_name,
+                },
+            },
         }
 
     def _execute_routed_intent(
@@ -603,6 +643,8 @@ class RequestCoordinator:
             )
 
         dispatch: dict[Operation, Callable[[], CoordinatorResponse]] = {
+            Operation.APPROVE: _approver_action,
+            Operation.REJECT: _approver_action,
             Operation.CANCEL: _approver_action,
             Operation.NEEDINFO: _approver_action,
             Operation.LOOKUP: lambda: self.lookup_request(

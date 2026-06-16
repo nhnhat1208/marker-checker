@@ -8,9 +8,6 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from agent.domain.models import ActorContext, MessageSource
-from agent.web.notifier import WEB_NOTIFICATION_HUB
-from agent.web.session import get_current_user
 from agent.contracts.ws import (
     WsActionMessage,
     WsChatHandlerBase,
@@ -20,6 +17,10 @@ from agent.contracts.ws import (
     WsTypingMessage,
     parse_ws_client_message,
 )
+from agent.domain.enums import Operation
+from agent.domain.models import ActorContext, MessageSource, WorkflowAction
+from agent.web.notifier import WEB_NOTIFICATION_HUB
+from agent.web.session import get_current_user
 from agent.web.ws_messages import done_payload, send_ws_message
 
 if TYPE_CHECKING:
@@ -72,12 +73,31 @@ class ChatWsHandler(WsChatHandlerBase):
 
     async def on_action_message(self, msg: WsActionMessage) -> None:
         await send_ws_message(self._ws, WsTypingMessage(type="typing"))
-        response = await self._loop.run_in_executor(
-            None,
-            lambda t=msg.op: self._orchestrator.handle_requester_message(
-                text=t, requester=self._actor, source=self._source
-            ),
-        )
+        if msg.op in {"confirm", "discard"}:
+            response = await self._loop.run_in_executor(
+                None,
+                lambda t=msg.op: self._orchestrator.handle_requester_message(
+                    text=t, requester=self._actor, source=self._source
+                ),
+            )
+        else:
+            operation = {
+                "approve": Operation.APPROVE,
+                "reject": Operation.REJECT,
+                "needinfo": Operation.NEEDINFO,
+            }[msg.op]
+            response = await self._loop.run_in_executor(
+                None,
+                lambda: self._orchestrator.handle_approver_action(
+                    actor=self._actor,
+                    action=WorkflowAction(
+                        action=operation,
+                        request_id=(msg.request_id or "").strip(),
+                        note=(msg.note or "").strip(),
+                    ),
+                    source=self._source,
+                ),
+            )
         await send_ws_message(self._ws, done_payload(response))
 
 

@@ -60,6 +60,7 @@ class RequestService:
             request_id=request_id,
             request_text=change.request_text,
             structured_payload_json=change.structured_payload_json,
+            impact_note=change.impact_note,
             requester_name=requester.name,
             requester_handle=requester.handle,
             approver_name=None,
@@ -161,6 +162,7 @@ class RequestService:
         record.business_reason = change.business_reason
         record.request_text = change.request_text
         record.structured_payload_json = change.structured_payload_json
+        record.impact_note = change.impact_note
         self._workflow_store.update_request(record)
 
         self._emit_event(
@@ -417,4 +419,5 @@ class RequestService:
             request_text=record.request_text,
             structured_payload_json=record.structured_payload_json,
             structured_payload=structured_payload,
+            impact_note=record.impact_note,
         )

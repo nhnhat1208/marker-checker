@@ -9,7 +9,12 @@
     "headline": "How can I help?",
     "subtitle": "Describe a change request in natural language — I'll route it to the right approver.",
     "tip": "Type /help to see all commands",
-    "all": "All"
+    "all": "All",
+    "search": "Search templates",
+    "no_results": "No templates match your search.",
+    "prev": "Prev",
+    "next": "Next",
+    "page_info": "Page {{current}} of {{total}}"
   },
   "composer": {
     "tab_message": "Message",
@@ -17,14 +22,90 @@
     "placeholders": [
       "Describe your change request…",
       "e.g. enable feature-X on api-gateway, ask annie@example.com to approve",
-      "e.g. change nginx timeout from 30s to 60s, @ops to review",
+      "e.g. change nginx timeout from 30s to 60s, ask ops@example.com to review",
       "Type / to browse commands"
     ],
     "placeholder_connecting": "Connecting…",
     "describe": "Describe the change…",
-    "approver": "Approver",
-    "approver_placeholder": "email or @handle",
+    "approver": "Approver email",
+    "approver_placeholder": "e.g. annie@example.com",
     "code_change": "Code change"
+  },
+  "missing_info": {
+    "title": "Need more info",
+    "badge": "Need info",
+    "single": "Please add this detail to continue",
+    "multiple": "Please add these details to continue",
+    "guidance": "Need {{fields}} to continue.",
+    "action": "Add missing details",
+    "summary_title": "Current snapshot",
+    "status_missing": "Missing",
+    "status_ready": "Captured",
+    "placeholder": "Not provided yet",
+    "fields": {
+      "target_label": "purpose",
+      "change_from_summary": "current state",
+      "change_to_summary": "new state",
+      "approver_handle": "approver email",
+      "request_text": "request description",
+      "structured_payload": "request details"
+    }
+  },
+  "change_summary": {
+    "current": "Current state",
+    "proposed": "Proposed state"
+  },
+  "chat_card": {
+    "request_fallback_title": "Request",
+    "requests_title": "Requests",
+    "draft_ready_title": "Draft ready to submit",
+    "draft_ready_body": "Review the extracted fields, then confirm to route the request.",
+    "draft_badge": "Draft",
+    "draft_parser_llm": "LLM assisted",
+    "needs_details_badge": "Needs details",
+    "meta_requester": "Requester",
+    "meta_approver": "Approver",
+    "meta_target": "Target",
+    "description": "Description",
+    "impact_note": "LLM note",
+    "confirm": "Confirm",
+    "discard": "Discard",
+    "approve": "Approve",
+    "reject": "Reject",
+    "need_info": "Need info",
+    "reject_reason": "Reject reason",
+    "need_info_prompt": "Need info prompt",
+    "reject_placeholder": "Explain why this request should be rejected",
+    "need_info_placeholder": "Ask for the missing detail you need",
+    "send_rejection": "Send rejection",
+    "request_info": "Request info",
+    "cancel": "Cancel",
+    "search_requests": "Search requests…",
+    "no_results": "No results for \"{{query}}\"",
+    "range_info": "{{start}}–{{end}} of {{total}}",
+    "page_info": "{{current}} / {{total}}",
+    "pending": {
+      "draft_confirm": "Confirming draft...",
+      "draft_discard": "Discarding draft...",
+      "review_approve": "Applying approval...",
+      "review_reject": "Sending rejection...",
+      "review_need_info": "Requesting more info..."
+    },
+    "status": {
+      "pending": "Pending",
+      "in_review": "In review",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled",
+      "error": "Error",
+      "needs_info": "Needs info"
+    }
+  },
+  "code_change": {
+    "before_block": "Before",
+    "after_block": "After",
+    "before_state": "Before change",
+    "after_state": "After change"
   },
   "lang": {
     "label": "Language",

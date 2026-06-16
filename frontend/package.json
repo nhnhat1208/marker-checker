@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "generate:ws-contract": "cd .. && uv run python scripts/generate_ws_contract.py",
+    "ui:add": "pnpm dlx shadcn@latest add",
     "dev": "rsbuild dev",
     "build": "rsbuild build",
     "preview": "rsbuild preview"

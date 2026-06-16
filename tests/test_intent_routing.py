@@ -60,6 +60,18 @@ class IntentRouterPatternTest(WorkflowTestCase):
         self.assertEqual(result.operation, Operation.CANCEL)
         self.assertEqual(result.note, "no longer needed")
 
+    def test_approve_and_reject_with_optional_slash(self) -> None:
+        for text, op, note in (
+            ("approve SMK-1A2B3C4D", Operation.APPROVE, ""),
+            ("/approve SMK-1A2B3C4D looks good", Operation.APPROVE, "looks good"),
+            ("reject SMK-1A2B3C4D missing rollback", Operation.REJECT, "missing rollback"),
+        ):
+            with self.subTest(text=text):
+                result = self._route(text)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.operation, op)
+                self.assertEqual(result.note, note)
+
     def test_history_routed(self) -> None:
         result = self._route("history SMK-ABC-456")
         self.assertIsNotNone(result)

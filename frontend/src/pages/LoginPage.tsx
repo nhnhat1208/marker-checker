@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { MessageSquare, Users, Zap, ShieldCheck, GitBranch, UserCheck, ArrowRight } from 'lucide-react'
+import MarkerLogo from '@/components/brand/MarkerLogo'
 import { cn } from '@/lib/utils'
 
 const ORBIT_FEATURES = [
@@ -312,23 +313,14 @@ function AgentScene() {
           />
 
           <div className="relative z-10 flex flex-col items-center">
-            <div
-            className="flex h-[6.85rem] w-[6.85rem] items-center justify-center rounded-[1.75rem]"
-            style={{
-              background: 'linear-gradient(145deg, #9ac0ff 0%, #4f8dff 24%, #2563eb 62%, #1d4ed8 100%)',
-              boxShadow: '0 0 0 1px rgba(255,255,255,.16), 0 0 72px rgba(59,130,246,.82), 0 24px 68px rgba(0,0,0,.52)',
-              animation: 'core-float 5s ease-in-out infinite',
-            }}
-          >
-            <div className="absolute inset-0 rounded-[1.75rem] opacity-38"
-              style={{ background: 'linear-gradient(135deg, rgba(255,255,255,.8) 0%, rgba(255,255,255,0) 58%)' }} />
-            <span
-              className="relative text-white text-[2.7rem] font-black leading-none tracking-[-0.04em]"
-              style={{ textShadow: '0 8px 28px rgba(255,255,255,.26)' }}
-            >
-              M
-            </span>
-            </div>
+            <MarkerLogo
+              className="h-[6.85rem] w-[6.85rem]"
+              title="Marker Checker"
+              style={{
+                animation: 'core-float 5s ease-in-out infinite',
+                filter: 'drop-shadow(0 0 72px rgba(59,130,246,.82)) drop-shadow(0 24px 68px rgba(0,0,0,.52))',
+              }}
+            />
 
             <div className="mt-5 text-center">
               <div className="text-[12px] font-semibold uppercase tracking-[0.28em] text-white [text-shadow:0_0_22px_rgba(255,255,255,.26)]">
@@ -612,9 +604,7 @@ export default function LoginPage() {
 
           {/* Logo */}
           <div className="flex items-center gap-2.5 mb-7">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
-              <span className="text-white text-sm font-bold select-none">M</span>
-            </div>
+            <MarkerLogo className="h-8 w-8" title="Marker Checker" />
             <span className="font-semibold text-gray-900 text-sm tracking-tight">Marker Checker</span>
           </div>
 

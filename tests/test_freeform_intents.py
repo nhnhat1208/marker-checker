@@ -157,3 +157,44 @@ class FreeformIntentTest(WorkflowTestCase):
         )
         self.assertEqual(needinfo_response["status"], "ok")
         self.assertEqual(needinfo_response["request"]["review_status"], "needs_info")
+
+    def test_approve_and_reject_freeform_intents(self) -> None:
+        self.orchestrator.handle_requester_message(
+            text="for sample-object, change from disabled to enabled, ask @checker to approve",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        first_submit = self.orchestrator.handle_requester_message(
+            text="/confirm",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        first_request_id = first_submit["request"]["request_id"]
+
+        approve_response = self.orchestrator.handle_requester_message(
+            text=f"approve {first_request_id}",
+            requester=ActorContext(name="Checker One", handle="@checker"),
+            source=self.source,
+        )
+        self.assertEqual(approve_response["status"], "ok")
+        self.assertEqual(approve_response["request"]["review_status"], "approved")
+
+        self.orchestrator.handle_requester_message(
+            text="for second-object, change from disabled to enabled, ask @checker to approve",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        second_submit = self.orchestrator.handle_requester_message(
+            text="/confirm",
+            requester=ActorContext(name="Requester One", handle="@requester"),
+            source=self.source,
+        )
+        second_request_id = second_submit["request"]["request_id"]
+
+        reject_response = self.orchestrator.handle_requester_message(
+            text=f"reject {second_request_id} missing rollback plan",
+            requester=ActorContext(name="Checker One", handle="@checker"),
+            source=self.source,
+        )
+        self.assertEqual(reject_response["status"], "ok")
+        self.assertEqual(reject_response["request"]["review_status"], "rejected")

@@ -72,6 +72,7 @@ class WebNotificationHub:
                 payload,
                 title=f"Approval needed · {request_id}" if request_id else "Approval needed",
                 body=impact_note or "A new request has been routed to you for review.",
+                impact_note=impact_note,
             ).model_dump(mode="json", exclude_none=True),
         }
         self._broadcast(approver_handle, response)

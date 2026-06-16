@@ -6,14 +6,20 @@
   :root {
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --primary: 221.2 83.2% 53.3%;
     --primary-foreground: 210 40% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.75rem;
     --chat-bg: 210 20% 96%;
@@ -22,14 +28,20 @@
   .dark {
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
     --muted: 240 3.7% 15.9%;
     --muted-foreground: 240 5% 64.9%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
     --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
     --ring: 217.2 91.2% 59.8%;
     --chat-bg: 240 10% 5.5%;
   }
@@ -38,14 +50,20 @@
   .dim {
     --background: 215 28% 17%;
     --foreground: 215 14% 78%;
+    --popover: 215 28% 17%;
+    --popover-foreground: 215 14% 78%;
     --muted: 213 17% 23%;
     --muted-foreground: 213 16% 52%;
     --border: 213 12% 28%;
     --input: 213 12% 28%;
     --primary: 212 92% 65%;
     --primary-foreground: 220 60% 10%;
+    --secondary: 213 17% 23%;
+    --secondary-foreground: 215 14% 78%;
     --accent: 213 17% 23%;
     --accent-foreground: 215 14% 78%;
+    --destructive: 0 72% 52%;
+    --destructive-foreground: 0 0% 98%;
     --ring: 212 92% 65%;
     --chat-bg: 213 22% 14%;
   }
@@ -54,14 +72,20 @@
   .dracula {
     --background: 231 15% 18%;
     --foreground: 60 30% 96%;
+    --popover: 231 15% 18%;
+    --popover-foreground: 60 30% 96%;
     --muted: 232 14% 25%;
     --muted-foreground: 240 7% 52%;
     --border: 232 14% 30%;
     --input: 232 14% 30%;
     --primary: 265 89% 78%;
     --primary-foreground: 231 15% 12%;
+    --secondary: 232 14% 25%;
+    --secondary-foreground: 60 30% 96%;
     --accent: 135 94% 65%;
     --accent-foreground: 231 15% 12%;
+    --destructive: 0 80% 62%;
+    --destructive-foreground: 231 15% 12%;
     --ring: 265 89% 78%;
     --chat-bg: 231 14% 15%;
   }

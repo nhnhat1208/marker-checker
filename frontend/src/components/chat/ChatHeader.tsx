@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { LogOut, Trash2, ChevronDown, Sun, Moon, Monitor, CloudMoon, Ghost, Check, Languages } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Separator } from '@/components/ui/separator'
+import MarkerLogo from '@/components/brand/MarkerLogo'
 import { cn } from '@/lib/utils'
 import { useTheme, type ThemePreference } from '@/contexts/theme'
 import i18n from '@/i18n'
@@ -239,9 +241,7 @@ export default function ChatHeader({ connected, hasMessages, user, onClear }: Pr
 
         {/* Brand */}
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary shadow-sm">
-            <span className="select-none text-sm font-bold text-primary-foreground">M</span>
-          </div>
+          <MarkerLogo className="h-8 w-8" title="Marker Checker" />
           <div>
             <p className="text-sm font-semibold text-foreground leading-tight">Marker Checker</p>
             <div className="flex items-center gap-1.5 mt-0.5">
@@ -266,7 +266,7 @@ export default function ChatHeader({ connected, hasMessages, user, onClear }: Pr
             <span className="hidden sm:inline">{t('header.clear_chat')}</span>
           </button>
 
-          <span className="h-4 w-px bg-border" />
+          <Separator orientation="vertical" className="h-4" />
 
           <ProfileMenu user={user} />
         </div>

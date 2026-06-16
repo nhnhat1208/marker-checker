@@ -1,194 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
-import { Send, ChevronDown, ChevronRight, Check } from 'lucide-react'
+import { Send, Paperclip, PencilLine, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import ReactCodeMirror from '@uiw/react-codemirror'
-import { yaml } from '@codemirror/lang-yaml'
-import { json } from '@codemirror/lang-json'
-import { githubLight, githubDark } from '@uiw/codemirror-theme-github'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { CodeFormat, StructuredRequestPayload } from '@/lib/chatTypes'
+import {
+  CHAT_COMPOSER_STORAGE_KEY,
+  CHAT_COMPOSER_TAB,
+  COMPOSER_SHORTCUT_HINTS,
+  EDITOR_LANGUAGE,
+  type EditorLanguage,
+  type ComposerTab,
+  SLASH_COMMAND_CATEGORY_ORDER,
+  SLASH_COMMANDS,
+  type SlashCommand,
+} from '@/lib/chatComposerConfig'
 import { cn } from '@/lib/utils'
-import { useTheme } from '@/contexts/theme'
-
-const DRAFT_STORAGE_KEY = 'marker-checker:chat-composer-draft-v2'
-
-// Placeholders loaded from i18n — see PLACEHOLDERS usage in the component body
-
-/* ── Slash commands ── */
-type SlashCommand = {
-  cmd: string
-  args?: string
-  desc: string
-  category: 'General' | 'Requests' | 'Approvals'
-}
-
-const COMMANDS: SlashCommand[] = [
-  { cmd: '/help',        desc: 'Show all available commands',               category: 'General'   },
-  { cmd: '/mypending',   desc: 'List your active requests',                 category: 'Requests'  },
-  { cmd: '/status',      args: 'REQ-XXXX',            desc: 'View request status & details',        category: 'Requests'  },
-  { cmd: '/history',     args: 'REQ-XXXX',            desc: 'Full event timeline of a request',     category: 'Requests'  },
-  { cmd: '/search',      args: '<query>',              desc: 'Search requests by target name',       category: 'Requests'  },
-  { cmd: '/confirm',     desc: 'Submit your pending draft',                  category: 'Requests'  },
-  { cmd: '/discard',     desc: 'Cancel your pending draft',                  category: 'Requests'  },
-  { cmd: '/resubmit',    args: 'REQ-XXXX <message>',  desc: 'Revise & resubmit after need-info',    category: 'Requests'  },
-  { cmd: '/myapprovals', desc: 'List requests waiting for your approval',   category: 'Approvals' },
-  { cmd: '/approve',     args: 'REQ-XXXX [note]',     desc: 'Approve a request',                    category: 'Approvals' },
-  { cmd: '/reject',      args: 'REQ-XXXX [reason]',   desc: 'Reject a request',                     category: 'Approvals' },
-  { cmd: '/needinfo',    args: 'REQ-XXXX [question]', desc: 'Ask requester for more information',   category: 'Approvals' },
-  { cmd: '/cancel',      args: 'REQ-XXXX [note]',     desc: 'Cancel a request',                     category: 'Approvals' },
-]
-
-const CATEGORY_ORDER: SlashCommand['category'][] = ['General', 'Requests', 'Approvals']
-
-/* ── Editor language ── */
-type EditorLanguage =
-  | 'yaml' | 'json'
-  | 'javascript' | 'typescript' | 'python'
-  | 'bash' | 'go' | 'sql' | 'rust'
-  | 'html' | 'css' | 'toml' | 'text'
-
-const LANGUAGE_GROUPS: { label: string; langs: { value: EditorLanguage; label: string }[] }[] = [
-  {
-    label: 'Data / Config',
-    langs: [
-      { value: 'yaml',       label: 'YAML'       },
-      { value: 'json',       label: 'JSON'       },
-      { value: 'toml',       label: 'TOML'       },
-    ],
-  },
-  {
-    label: 'Code',
-    langs: [
-      { value: 'javascript', label: 'JavaScript' },
-      { value: 'typescript', label: 'TypeScript' },
-      { value: 'python',     label: 'Python'     },
-      { value: 'bash',       label: 'Bash'       },
-      { value: 'go',         label: 'Go'         },
-      { value: 'rust',       label: 'Rust'       },
-      { value: 'sql',        label: 'SQL'        },
-    ],
-  },
-  {
-    label: 'Web',
-    langs: [
-      { value: 'html',       label: 'HTML'       },
-      { value: 'css',        label: 'CSS'        },
-    ],
-  },
-  {
-    label: 'Other',
-    langs: [
-      { value: 'text',       label: 'Plain text' },
-    ],
-  },
-]
+import CodeChangesDialog from './CodeChangesDialog'
 
 function toCodeFormat(lang: EditorLanguage): CodeFormat {
-  if (lang === 'yaml') return 'yaml'
-  if (lang === 'json') return 'json'
+  if (lang === EDITOR_LANGUAGE.YAML) return 'yaml'
+  if (lang === EDITOR_LANGUAGE.JSON) return 'json'
   return 'text'
-}
-
-function getExtension(lang: EditorLanguage) {
-  if (lang === 'yaml') return [yaml()]
-  if (lang === 'json') return [json()]
-  return []
-}
-
-/* ── Cascading language picker ── */
-function LanguagePicker({ value, onChange }: { value: EditorLanguage; onChange: (l: EditorLanguage) => void }) {
-  const [open, setOpen] = useState(false)
-  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-  const hideTimer = useRef<ReturnType<typeof setTimeout>>()
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) { setOpen(false); setHoveredGroup(null) }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  useEffect(() => () => clearTimeout(hideTimer.current), [])
-
-  const showGroup = (label: string) => { clearTimeout(hideTimer.current); setHoveredGroup(label) }
-  const scheduleHide = () => { hideTimer.current = setTimeout(() => setHoveredGroup(null), 150) }
-  const cancelHide   = () => { clearTimeout(hideTimer.current) }
-
-  const currentLabel = LANGUAGE_GROUPS.flatMap(g => g.langs).find(l => l.value === value)?.label ?? value
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => { setOpen(v => !v); setHoveredGroup(null) }}
-        className={cn(
-          'flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors',
-          'border-border hover:bg-muted focus:outline-none',
-          open && 'bg-muted',
-        )}>
-        <span className="font-mono">{currentLabel}</span>
-        <ChevronDown className={cn('h-3 w-3 text-muted-foreground transition-transform duration-150', open && 'rotate-180')} />
-      </button>
-
-      {open && (
-        <div className={cn(
-          'absolute bottom-full left-0 z-50 mb-1.5 min-w-[9rem] py-1',
-          'rounded-xl border border-border bg-background shadow-2xl',
-          'animate-in fade-in-0 slide-in-from-bottom-2 duration-150',
-        )}>
-          {LANGUAGE_GROUPS.map(group => (
-            <div
-              key={group.label}
-              className="relative"
-              onMouseEnter={() => showGroup(group.label)}
-              onMouseLeave={scheduleHide}>
-              <button
-                type="button"
-                className={cn(
-                  'flex w-full items-center justify-between gap-4 whitespace-nowrap px-3 py-1.5 text-xs transition-colors',
-                  hoveredGroup === group.label
-                    ? 'bg-muted text-foreground font-medium'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}>
-                {group.label}
-                <ChevronRight className="h-3 w-3 shrink-0 opacity-40" />
-              </button>
-              {hoveredGroup === group.label && (
-                <div
-                  onMouseEnter={cancelHide}
-                  onMouseLeave={scheduleHide}
-                  className={cn(
-                    'absolute left-full top-0 z-50 min-w-[8rem] max-h-56 overflow-y-auto py-1',
-                    'rounded-xl border border-border bg-background shadow-2xl',
-                    'animate-in fade-in-0 slide-in-from-left-1 duration-100',
-                  )}>
-                  {group.langs.map(lang => (
-                    <button
-                      key={lang.value}
-                      type="button"
-                      onMouseDown={e => { e.preventDefault(); onChange(lang.value); setOpen(false); setHoveredGroup(null) }}
-                      className={cn(
-                        'flex w-full items-center justify-between gap-4 whitespace-nowrap px-3 py-1.5 text-xs transition-colors',
-                        value === lang.value
-                          ? 'text-primary font-semibold'
-                          : 'text-foreground hover:bg-muted/60',
-                      )}>
-                      {lang.label}
-                      {value === lang.value && <Check className="h-3 w-3 shrink-0 text-primary" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 /* ── Command picker popup ── */
@@ -200,15 +35,15 @@ function CommandPicker({
   onSelect: (cmd: SlashCommand) => void
 }) {
   const activeRef = useRef<HTMLButtonElement>(null)
-  const filtered = COMMANDS.filter(c => c.cmd.slice(1).startsWith(query.toLowerCase()))
+  const filtered = SLASH_COMMANDS.filter(command => command.cmd.slice(1).startsWith(query.toLowerCase()))
 
   useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }) }, [activeIdx])
 
   if (!filtered.length) return null
 
-  const grouped = CATEGORY_ORDER.reduce<Record<string, SlashCommand[]>>((acc, cat) => {
-    const items = filtered.filter(c => c.category === cat)
-    if (items.length) acc[cat] = items
+  const grouped = SLASH_COMMAND_CATEGORY_ORDER.reduce<Record<string, SlashCommand[]>>((acc, category) => {
+    const items = filtered.filter(command => command.category === category)
+    if (items.length) acc[category] = items
     return acc
   }, {})
 
@@ -248,7 +83,7 @@ function CommandPicker({
         </div>
       ))}
       <div className="sticky bottom-0 flex items-center gap-3 border-t border-border bg-background/95 px-3 py-1.5 backdrop-blur-sm">
-        {[['↑↓', 'navigate'], ['↵', 'select'], ['Esc', 'close']].map(([key, hint]) => (
+        {COMPOSER_SHORTCUT_HINTS.map(([key, hint]) => (
           <span key={key} className="text-[10px] text-muted-foreground/60">
             <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{key}</kbd>{' '}{hint}
           </span>
@@ -257,58 +92,6 @@ function CommandPicker({
     </div>
   )
 }
-
-/* ── Code editor with CodeMirror ── */
-function CodeEditor({
-  value, onChange, label, tone, language,
-}: {
-  value: string
-  onChange: (v: string) => void
-  label: string
-  tone: 'before' | 'after'
-  language: EditorLanguage
-}) {
-  const { theme } = useTheme()
-
-  return (
-    <div className={cn(
-      'flex-1 min-w-0 overflow-hidden rounded-xl border',
-      'border-border',
-    )}>
-      <div className={cn(
-        'border-b px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest select-none',
-        tone === 'before'
-          ? 'border-rose-100 bg-rose-50 text-rose-600 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-400'
-          : 'border-emerald-100 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-400',
-      )}>
-        {label}
-      </div>
-      <ReactCodeMirror
-        value={value}
-        onChange={(val: string) => onChange(val)}
-        theme={theme === 'dark' ? githubDark : githubLight}
-        extensions={getExtension(language)}
-        minHeight="5rem"
-        maxHeight="10rem"
-        placeholder={language === 'text' ? 'Plain text here…' : `# ${language} here…`}
-        basicSetup={{
-          lineNumbers: false,
-          foldGutter: false,
-          dropCursor: true,
-          highlightActiveLine: true,
-          highlightSelectionMatches: false,
-          bracketMatching: true,
-          closeBrackets: true,
-          autocompletion: false,
-        }}
-        style={{ fontSize: '12px' }}
-      />
-    </div>
-  )
-}
-
-/* ── Main composer ── */
-type ComposerTab = 'message' | 'request'
 
 type Props = {
   connected: boolean
@@ -320,21 +103,22 @@ type Props = {
 export default function ChatComposer({ connected, onSend, fillText, onFillConsumed }: Props) {
   const { t } = useTranslation()
   const placeholders = t('composer.placeholders', { returnObjects: true }) as string[]
-  const [tab, setTab]               = useState<ComposerTab>('message')
+  const [tab, setTab]               = useState<ComposerTab>(CHAT_COMPOSER_TAB.MESSAGE)
   const [text, setText]             = useState('')
   const [approver, setApprover]     = useState('')
   const [before, setBefore]         = useState('')
   const [after, setAfter]           = useState('')
-  const [language, setLanguage]     = useState<EditorLanguage>('yaml')
+  const [language, setLanguage]     = useState<EditorLanguage>(EDITOR_LANGUAGE.YAML)
+  const [showCodeDialog, setShowCodeDialog] = useState(false)
   const [placeholderIdx, setPlaceholderIdx] = useState(0)
   const [pickerIdx, setPickerIdx]   = useState(0)
   const textRef = useRef<HTMLTextAreaElement>(null)
 
   // Slash command picker (message tab only)
-  const slashMatch   = tab === 'message' ? text.match(/^\/(\S*)$/) : null
+  const slashMatch   = tab === CHAT_COMPOSER_TAB.MESSAGE ? text.match(/^\/(\S*)$/) : null
   const showPicker   = Boolean(slashMatch && connected)
   const pickerQuery  = slashMatch ? slashMatch[1] : ''
-  const filteredCmds = COMMANDS.filter(c => c.cmd.slice(1).startsWith(pickerQuery.toLowerCase()))
+  const filteredCmds = SLASH_COMMANDS.filter(command => command.cmd.slice(1).startsWith(pickerQuery.toLowerCase()))
 
   useEffect(() => { setPickerIdx(0) }, [pickerQuery])
 
@@ -348,25 +132,26 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
   // Restore draft
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(DRAFT_STORAGE_KEY)
+      const stored = window.localStorage.getItem(CHAT_COMPOSER_STORAGE_KEY)
       if (!stored) return
       const p = JSON.parse(stored) as Partial<{
         tab: ComposerTab; text: string; approver: string; before: string; after: string; language: EditorLanguage
       }>
-      if (p.tab === 'message' || p.tab === 'request') setTab(p.tab)
+      if (p.tab === CHAT_COMPOSER_TAB.MESSAGE || p.tab === CHAT_COMPOSER_TAB.REQUEST) setTab(p.tab)
       setText(typeof p.text === 'string' ? p.text : '')
       setApprover(typeof p.approver === 'string' ? p.approver : '')
       setBefore(typeof p.before === 'string' ? p.before : '')
       setAfter(typeof p.after === 'string' ? p.after : '')
       if (p.language) setLanguage(p.language)
-    } catch { window.localStorage.removeItem(DRAFT_STORAGE_KEY) }
+    } catch { window.localStorage.removeItem(CHAT_COMPOSER_STORAGE_KEY) }
   }, [])
 
   // Consume external fill text (from empty-state examples)
   useEffect(() => {
     if (!fillText) return
     setText(fillText)
-    setTab('message')
+    setTab(CHAT_COMPOSER_TAB.MESSAGE)
+    setShowCodeDialog(false)
     onFillConsumed?.()
     setTimeout(() => {
       if (textRef.current) {
@@ -379,15 +164,22 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
 
   // Persist draft
   useEffect(() => {
-    if (!text && !approver && !before && !after) { window.localStorage.removeItem(DRAFT_STORAGE_KEY); return }
-    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ tab, text, approver, before, after, language }))
+    if (!text && !approver && !before && !after) {
+      window.localStorage.removeItem(CHAT_COMPOSER_STORAGE_KEY)
+      return
+    }
+    window.localStorage.setItem(
+      CHAT_COMPOSER_STORAGE_KEY,
+      JSON.stringify({ tab, text, approver, before, after, language }),
+    )
   }, [after, approver, before, language, tab, text])
 
   const canSend = connected && (
-    tab === 'message'
+    tab === CHAT_COMPOSER_TAB.MESSAGE
       ? Boolean(text.trim())
       : Boolean(text.trim() || before.trim() || after.trim())
   )
+  const hasCodeChanges = Boolean(before.trim() || after.trim())
 
   const selectCommand = (cmd: SlashCommand) => {
     if (cmd.args) {
@@ -402,7 +194,7 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
 
   const submit = () => {
     if (!canSend) return
-    if (tab === 'message') {
+    if (tab === CHAT_COMPOSER_TAB.MESSAGE) {
       const trimmed = text.trim()
       if (!trimmed) return
       onSend(trimmed)
@@ -418,7 +210,8 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
       } satisfies StructuredRequestPayload)
     }
     setText(''); setApprover(''); setBefore(''); setAfter('')
-    window.localStorage?.removeItem(DRAFT_STORAGE_KEY)
+    setShowCodeDialog(false)
+    window.localStorage?.removeItem(CHAT_COMPOSER_STORAGE_KEY)
     if (textRef.current) { textRef.current.style.height = 'auto'; textRef.current.focus() }
   }
 
@@ -458,29 +251,29 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
           )}>
 
             {/* Tab bar */}
-            <div className="flex items-center gap-0.5 border-b border-border/60 bg-muted/60 px-2 py-1.5">
-              {(['message', 'request'] as const).map(tabId => (
+            <div className="flex items-center gap-0.5 border-b border-border/60 bg-muted/40 px-2 py-1.5">
+              {([CHAT_COMPOSER_TAB.MESSAGE, CHAT_COMPOSER_TAB.REQUEST] as const).map(tabId => (
                 <button
                   key={tabId}
                   type="button"
                   onClick={() => setTab(tabId)}
                   disabled={!connected}
                   className={cn(
-                    'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
                     tab === tabId
                       ? 'bg-background text-foreground shadow ring-1 ring-border/70'
                       : 'text-muted-foreground hover:text-foreground disabled:pointer-events-none',
                   )}
                 >
-                  {tabId === 'message' ? t('composer.tab_message') : t('composer.tab_request')}
+                  {tabId === CHAT_COMPOSER_TAB.MESSAGE ? t('composer.tab_message') : t('composer.tab_request')}
                 </button>
               ))}
             </div>
 
             {/* Message tab */}
-            {tab === 'message' && (
+            {tab === CHAT_COMPOSER_TAB.MESSAGE && (
               <div className="px-4 pt-3 pb-2">
-                <textarea
+                <Textarea
                   ref={textRef}
                   value={text}
                   onChange={handleTextChange}
@@ -488,18 +281,18 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
                   placeholder={connected ? (placeholders[placeholderIdx] ?? placeholders[0]) : t('composer.placeholder_connecting')}
                   disabled={!connected}
                   rows={1}
-                  className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
+                  className="min-h-0 resize-none border-0 bg-transparent px-0 py-0 text-sm leading-relaxed shadow-none focus-visible:ring-0 disabled:opacity-50"
                   style={{ minHeight: '1.75rem', maxHeight: '10rem' }}
                 />
               </div>
             )}
 
             {/* Create Request tab */}
-            {tab === 'request' && (
-              <div className="max-h-[55vh] overflow-y-auto overscroll-contain sm:max-h-[30rem]">
-                <div className="space-y-2.5 px-3 pt-3 pb-2.5">
-                  {/* Description */}
-                  <textarea
+            {tab === CHAT_COMPOSER_TAB.REQUEST && (
+              <div className="space-y-3 px-4 py-3 sm:px-5">
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Request</p>
+                  <Textarea
                     ref={textRef}
                     value={text}
                     onChange={handleTextChange}
@@ -507,40 +300,80 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
                     placeholder={t('composer.describe')}
                     disabled={!connected}
                     rows={2}
-                    className="w-full resize-none bg-transparent px-1 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
-                    style={{ minHeight: '2.5rem', maxHeight: '5rem' }}
+                    className="min-h-0 resize-none rounded-xl border-border/70 bg-background px-3 py-2.5 text-sm leading-relaxed shadow-none focus-visible:ring-2 focus-visible:ring-primary/10 disabled:opacity-50"
+                    style={{ minHeight: '3.25rem', maxHeight: '4.75rem' }}
                   />
-                  {/* Approver */}
-                  <div className="rounded-xl border border-border/70 bg-muted/40 px-3 py-2">
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                      {t('composer.approver')}
-                    </label>
-                    <input
-                      value={approver}
-                      onChange={e => setApprover(e.target.value)}
-                      placeholder={t('composer.approver_placeholder')}
-                      className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
-                    />
-                  </div>
-                  {/* Code change */}
-                  <div>
-                    <div className="mb-2 flex items-center gap-2">
-                      <span className="text-xs font-medium text-muted-foreground">{t('composer.code_change')}</span>
-                      <LanguagePicker value={language} onChange={setLanguage} />
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-                      <CodeEditor value={before} onChange={setBefore} label="Before" tone="before" language={language} />
-                      <CodeEditor value={after}  onChange={setAfter}  label="After"  tone="after"  language={language} />
-                    </div>
-                  </div>
                 </div>
+
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Approver email</p>
+                  <Input
+                    value={approver}
+                    onChange={e => setApprover(e.target.value)}
+                    placeholder={t('composer.approver_placeholder')}
+                    className="h-9 rounded-xl border-border/70 bg-background px-3 text-sm shadow-none focus-visible:ring-2 focus-visible:ring-primary/10"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={hasCodeChanges ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setShowCodeDialog(true)}
+                    className={cn(
+                      'rounded-full',
+                      hasCodeChanges
+                        ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90'
+                        : 'border-border/70 bg-background text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                    {hasCodeChanges ? 'Code attached' : 'Attach code changes'}
+                  </Button>
+
+                  {hasCodeChanges && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowCodeDialog(true)}
+                        className="rounded-full text-muted-foreground hover:text-foreground"
+                      >
+                        <PencilLine className="h-3.5 w-3.5" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setBefore('')
+                          setAfter('')
+                          setShowCodeDialog(false)
+                        }}
+                        className="rounded-full text-muted-foreground hover:text-foreground"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                {!hasCodeChanges && (
+                  <p className="text-[11px] text-muted-foreground/70">
+                    Optional. Add code only when the diff matters.
+                  </p>
+                )}
               </div>
             )}
 
             {/* Footer */}
             <div className={cn(
               'flex items-center justify-end gap-2 px-3 py-2',
-              tab === 'request' && 'border-t border-border/50 bg-muted/40',
+              tab === CHAT_COMPOSER_TAB.REQUEST && 'border-t border-border/50 bg-muted/40',
             )}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -554,7 +387,7 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
                   <span className="ml-2 opacity-60">↵</span>
                   <span className="ml-3 opacity-40">·</span>
                   <span className="ml-3 opacity-60">⇧↵ newline</span>
-                  {tab === 'message' && (
+                  {tab === CHAT_COMPOSER_TAB.MESSAGE && (
                     <>
                       <span className="ml-3 opacity-40">·</span>
                       <span className="ml-3 opacity-60">/ commands</span>
@@ -567,6 +400,22 @@ export default function ChatComposer({ connected, onSend, fillText, onFillConsum
           </div>
         </div>
       </div>
+      <CodeChangesDialog
+        open={showCodeDialog}
+        onOpenChange={setShowCodeDialog}
+        before={before}
+        after={after}
+        language={language}
+        onSave={({ before: nextBefore, after: nextAfter, language: nextLanguage }) => {
+          setBefore(nextBefore)
+          setAfter(nextAfter)
+          setLanguage(nextLanguage)
+        }}
+        onClear={() => {
+          setBefore('')
+          setAfter('')
+        }}
+      />
     </div>
   )
 }

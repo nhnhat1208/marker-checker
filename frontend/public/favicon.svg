@@ -1,4 +1,73 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#3B82F6"/>
-  <text x="16" y="23" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="white" text-anchor="middle">M</text>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bgGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(304 184) rotate(43) scale(950 840)">
+      <stop offset="0" stop-color="#123F9E"/>
+      <stop offset="0.38" stop-color="#0A2B72"/>
+      <stop offset="1" stop-color="#031736"/>
+    </radialGradient>
+
+    <linearGradient id="markGradient" x1="122" y1="603" x2="905" y2="623" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1268FF"/>
+      <stop offset="0.36" stop-color="#1985FF"/>
+      <stop offset="0.62" stop-color="#19C5D8"/>
+      <stop offset="0.82" stop-color="#25D36A"/>
+      <stop offset="1" stop-color="#7CF34A"/>
+    </linearGradient>
+
+    <linearGradient id="edgeHighlight" x1="122" y1="520" x2="895" y2="530" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5CA3FF" stop-opacity="0.7"/>
+      <stop offset="0.5" stop-color="#77E8FF" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#B0FF7A" stop-opacity="0.55"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="70" y="300" width="900" height="480" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="20" flood-color="#000814" flood-opacity="0.36"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#001B44" flood-opacity="0.45"/>
+    </filter>
+
+    <filter id="innerSoft" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#1559D6" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+
+  <!-- App icon background -->
+  <rect width="1024" height="1024" rx="142" fill="url(#bgGlow)"/>
+  <rect x="1.5" y="1.5" width="1021" height="1021" rx="140.5" stroke="#1E56B8" stroke-opacity="0.20" stroke-width="3"/>
+
+  <!-- m + M + check mark. Approximation of the generated mark, flat SVG vector. -->
+  <g filter="url(#softShadow)">
+    <path
+      d="M134 659
+         L134 506
+         L208 584
+         L282 506
+         L359 658
+         L489 335
+         L712 680
+         L892 480"
+      stroke="url(#markGradient)"
+      stroke-width="88"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+
+  <!-- subtle top/inner highlight to mimic the glossy ribbon in the reference -->
+  <path
+    d="M134 506
+       L208 584
+       L282 506
+       L359 658
+       L489 335
+       L712 680
+       L892 480"
+    stroke="url(#edgeHighlight)"
+    stroke-width="14"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.62"
+  />
+
+  <!-- very subtle blue ambience behind mark -->
+  <ellipse cx="512" cy="574" rx="470" ry="230" fill="#0D6BFF" opacity="0.045" filter="url(#innerSoft)"/>
 </svg>

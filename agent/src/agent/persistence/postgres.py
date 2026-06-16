@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS requests (
     request_id             TEXT PRIMARY KEY,
     request_text           TEXT NOT NULL DEFAULT '',
     structured_payload_json TEXT,
+    impact_note            TEXT,
     requester_name         TEXT,
     requester_handle       TEXT NOT NULL DEFAULT '',
     approver_name          TEXT,
@@ -123,6 +124,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_request_id
 
 _MIGRATIONS = (
     "ALTER TABLE requests ADD COLUMN IF NOT EXISTS structured_payload_json TEXT",
+    "ALTER TABLE requests ADD COLUMN IF NOT EXISTS impact_note TEXT",
 )
 
 
@@ -165,7 +167,7 @@ class PostgresWorkflowStore:
     def create_request(self, request: RequestRecord) -> RequestRecord:
         sql = """
         INSERT INTO requests (
-            request_id, request_text, structured_payload_json, requester_name, requester_handle,
+            request_id, request_text, structured_payload_json, impact_note, requester_name, requester_handle,
             approver_name, approver_handle, target_label, target_object_type,
             change_from_summary, change_to_summary, business_reason, review_status,
             current_revision, last_submitted_revision, last_submitted_at,
@@ -174,7 +176,7 @@ class PostgresWorkflowStore:
             cancelled_by_handle, cancellation_note, origin_channel_id,
             origin_thread_id, origin_message_id
         ) VALUES (
-            %(request_id)s, %(request_text)s, %(structured_payload_json)s,
+            %(request_id)s, %(request_text)s, %(structured_payload_json)s, %(impact_note)s,
             %(requester_name)s, %(requester_handle)s, %(approver_name)s,
             %(approver_handle)s, %(target_label)s, %(target_object_type)s,
             %(change_from_summary)s, %(change_to_summary)s, %(business_reason)s,
@@ -194,6 +196,7 @@ class PostgresWorkflowStore:
         UPDATE requests SET
             request_text = %(request_text)s,
             structured_payload_json = %(structured_payload_json)s,
+            impact_note = %(impact_note)s,
             requester_name = %(requester_name)s,
             requester_handle = %(requester_handle)s,
             approver_name = %(approver_name)s,
