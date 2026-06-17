@@ -2,39 +2,34 @@
 
 ## Purpose
 
-Build a simple chat-first approval tool.
+Build a simple chat-first approval tool for small change requests.
 
-The tool helps:
-
-- a requester create a change request
-- an approver review and resolve it
-- a lookup user check status and audit history
-
-## Initial Scope
+## Scope
 
 In scope:
 
-- Telegram and API request intake
+- request intake from Telegram, web chat, or API invocation
 - requester confirmation before submission
-- one approver per request
+- one requester and one approver per request
 - approve, reject, need-info, cancel
-- lookup by exact request ID
-- audit trail in Google Sheets
+- lookup by request ID, plus lightweight search and personal request lists
+- audit trail for every state-changing action
+- PostgreSQL as the default store, with Google Sheets as a legacy fallback
+- optional LLM assistance for parsing and wording
 
 Out of scope:
 
-- RBAC
-- web UI
-- group-chat workflow
+- RBAC or admin console
+- multi-step approval chains
+- file attachments
 - direct mutation of external platform objects
-- AI diff analysis
+- AI making final approval decisions
 
 ## Product Boundaries
 
 - one request represents one proposed change
-- one requester starts the request
-- one approver is identified by a resolvable handle
 - a request is created only after requester confirmation
+- one approver is identified by a resolvable handle
 - every state-changing action must resolve to exactly one request
 - request ID is the canonical reference
 
@@ -42,18 +37,18 @@ Out of scope:
 
 ### Requester
 
-- sends the change request
-- confirms the normalized summary
-- answers follow-up questions
+- starts a request
+- confirms the normalized draft
+- answers follow-up questions after `needs_info`
 
 ### Approver
 
-- reviews the request
-- approves, rejects, asks for more info, or cancels where allowed
+- reviews the submitted request
+- approves, rejects, requests more info, or cancels where allowed
 
 ### Lookup User
 
-- checks request status or history by request ID
+- checks status, history, search results, or personal request lists
 
 ### Agent
 
@@ -64,7 +59,7 @@ Out of scope:
 
 ## Success Criteria
 
-- requester can create a request from chat
-- approver can resolve the request from chat
-- lookup by request ID works
+- a requester can create a request from chat
+- an approver can resolve it from chat
+- request lookup and lightweight query flows work reliably
 - audit history clearly explains what happened

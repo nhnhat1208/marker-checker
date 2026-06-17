@@ -1,6 +1,6 @@
-# Configuration And Integrations
+# Configuration, Integrations
 
-## Configuration Pattern
+## Config Files
 
 | File | Purpose | Committed |
 | --- | --- | --- |
@@ -14,7 +14,7 @@
 
 The application loads YAML first, then applies environment variable overrides. Env vars set to empty strings are ignored (`env_ignore_empty=True`) — this prevents the platform from crashing startup when it injects blank env vars for removed keys during rolling deploys.
 
-## Config Areas
+## Main Settings
 
 ### App
 
@@ -63,10 +63,10 @@ Web UI is enabled automatically when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRE
 
 - `GOOGLE_CLIENT_ID` — OAuth 2.0 client ID from Google Cloud Console
 - `GOOGLE_CLIENT_SECRET` — OAuth 2.0 client secret
-- `GOOGLE_REDIRECT_URI` — optional; auto-derived from `GREENNODE_ENDPOINT_URL` if empty. Set explicitly when using a custom domain.
+- `GOOGLE_REDIRECT_URI` — optional; derived from the incoming request URL if empty. Set explicitly when using a custom domain or when local/dev routing needs a fixed callback URL.
 - `GOOGLE_SESSION_SECRET` — random secret for signing httponly session cookies (itsdangerous, 7-day TTL). Required when web is enabled.
 
-## Integrations
+## External Services
 
 ### Web UI Integration
 
@@ -81,11 +81,34 @@ Routes registered when web is enabled:
 - `WS /ws/chat` → WebSocket chat, piped to `RequestCoordinator`
 - `GET /*` → SPA fallback (serves `index.html`)
 
-The React frontend (`ui/`) is built with Rsbuild (Rspack/Rust) + Tailwind CSS, copied into `/app/static` at image build time via a multi-stage Dockerfile (Node 22 + pnpm 10 → Python 3.11 slim). No separate Node.js process in production — FastAPI serves the static bundle directly.
+The React frontend (`frontend/`) is built with Rsbuild (Rspack/Rust) + Tailwind CSS, copied into `/app/static` at image build time via a multi-stage Dockerfile (Node 22 + pnpm 10 → Python 3.11 slim). No separate Node.js process in production — FastAPI serves the static bundle directly.
 
 ### Telegram Integration
 
 Request intake, approval actions, status and history lookup. Uses python-telegram-bot v21+. In production (AgentBase Runtime), Telegram pushes updates via webhook to `/telegram-webhook`; the container registers the webhook URL on startup using `TELEGRAM_WEBHOOK_URL` (set in `deploy.env`). `GREENNODE_ENDPOINT_URL` is the internal invocation URL — not publicly routable from Telegram's servers — so `TELEGRAM_WEBHOOK_URL` must point to the public AgentBase endpoint URL (`agentbase-runtime.aiplatform.vngcloud.vn`). `setWebhook` retries up to 5 times with exponential backoff on failure. For local development, long polling is used as a fallback (`TELEGRAM_MODE=polling` via `runtime.local.yaml` or env var). During rolling deploys with polling enabled, a 409 Conflict is handled with automatic retry (up to 3 minutes).
+
+#### Testing Locally
+
+Local Telegram testing flow:
+
+1. create a bot with BotFather using `/newbot`
+2. copy the token into `deploy.env` as `TELEGRAM_BOT_TOKEN`
+3. set `telegram.mode: polling` in `runtime.local.yaml`
+4. run `make run`
+5. send `/start` to the bot from each Telegram account involved in the test
+
+Why `/start` matters:
+
+- the app stores a handle-to-`chat_id` mapping in `chat_registry`
+- approver notifications can only be sent after that approver has already interacted with the bot once
+- if an approver never messaged the bot, the request still exists, but Telegram notification is skipped until the mapping is known
+
+Recommended manual test:
+
+1. requester account sends a new change request
+2. requester confirms the generated draft
+3. approver account receives the notification and responds with inline buttons or `/approve`, `/reject`, `/needinfo`
+4. requester account receives the follow-up result notification
 
 ### PostgreSQL (Neon) Integration
 
@@ -103,7 +126,7 @@ Optional. Used for request parsing, clarification wording, and status summaries.
 
 Optional. Uses AgentBase Memory Service for user preference recall and approver behavior pattern extraction. Requires a Memory store with two LTMS strategies configured. When disabled, the workflow uses static defaults.
 
-## Container and Deployment
+## Deployment
 
 Built with `uv sync --frozen --no-dev` for reproducible installs. Dependencies install in a separate layer — rebuilds only re-install when `pyproject.toml` or `uv.lock` change. `uv.lock` must not be in `.dockerignore`.
 
@@ -130,6 +153,6 @@ Never commit:
 For local development: keep secrets in environment variables or `runtime.local.yaml` (gitignored).
 For deployment: keep secrets in `deploy.env` (gitignored), passed via `--env-file deploy.env`.
 
-## Integration Rule
+## Design Rule
 
 External integrations stay behind interfaces (`WorkflowStore`, `RequestInputAssistant`). This keeps workflow logic independent from vendor SDKs and makes storage replaceable.

@@ -1,16 +1,32 @@
-# Documentation Map
+# Documentation Guide
 
-The docs are intentionally small and grouped into three areas.
+This repo keeps each topic in one place so the same explanation does not need to be repeated across files.
 
-## Product
+## Start Here
+
+1. [Root README](../README.md) for getting started, commands, and project layout
+2. [Product Overview](./product-spec/overview.md) for scope and boundaries
+3. [Workflow Lifecycle](./product-spec/workflow-lifecycle.md) for request states and transitions
+4. [Architecture](./technical-design/architecture.md) for backend structure
+5. [Configuration, Integrations](./technical-design/configuration-integrations.md) for config and external services
+6. [Web UI](./technical-design/web-ui.md) for the browser channel
+
+## Product Docs
 
 - [Overview](./product-spec/overview.md)
-- [Workflow And Lifecycle](./product-spec/workflow-and-lifecycle.md)
-- [Data Model And Audit](./product-spec/data-model-and-audit.md)
+- [Workflow Lifecycle](./product-spec/workflow-lifecycle.md)
+- [Data Model Audit](./product-spec/data-model-audit.md)
 
-## Technical
+## Technical Docs
 
-- [Architecture](./technical-design/architecture.md) — layers, components, state/caching, WS contract pipeline, Telegram mode, AgentBase migration status
-- [Web UI](./technical-design/web-ui.md) — React frontend, WebSocket protocol, file structure, phases
-- [Configuration And Integrations](./technical-design/configuration-and-integrations.md) — config split, integrations, deploy commands
-- [Architecture Diagrams](./technical-design/architecture-diagrams.md) — component + sequence diagrams for webhook (production) and polling (local dev) modes
+- [Architecture](./technical-design/architecture.md)
+- [Configuration, Integrations](./technical-design/configuration-integrations.md)
+- [Web UI](./technical-design/web-ui.md)
+- [Architecture Diagrams](./technical-design/architecture-diagrams.md) — supplemental visual references; use the main architecture doc as the current source of truth
+
+## Update Rules
+
+- Update `README.md` when setup, commands, or top-level workflow changes.
+- Update product docs when user-facing behavior changes.
+- Update technical docs when implementation, routes, contracts, or integrations change.
+- Keep `architecture-diagrams.md` aligned with `architecture.md`, but treat the main architecture doc as the source of truth.

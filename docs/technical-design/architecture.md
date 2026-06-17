@@ -47,6 +47,8 @@ This layer only receives messages and sends responses.
 - `DraftManager`
 - `RequestService`
 - `AuditService`
+- `RequestQueryService`
+- `FreeformIntentRouter`
 
 This layer owns request flow, transitions, and audit behavior.
 
@@ -81,9 +83,44 @@ This layer hides storage details from workflow code.
 | `DraftManager` | write-through cache for draft and resubmit state (TTLCache + PostgreSQL / Google Sheets backing) |
 | `RequestService` | create and transition requests |
 | `AuditService` | append and read audit events |
+| `RequestQueryService` | lookup, history, search, requester-pending, and approver-pending read operations |
+| `FreeformIntentRouter` | map natural-language management commands to workflow/query operations before AI fallback |
 | `RequestInputAssistant` | optional LLM parsing and response help |
 | `AgentMemoryService` | optional AgentBase Memory Service for user preferences and approver patterns |
 | `PostgresWorkflowStore` / `GoogleSheetsWorkflowStore` | persist requests, audit history, and session state (Postgres is default; Google Sheets is legacy fallback) |
+
+## Runtime Composition
+
+`MarkerCheckerApp` is the composition root for the backend runtime. It wires config, persistence, workflow services, adapters, and notification callbacks in one place before the container starts serving traffic.
+
+Startup composition order:
+
+1. load `RuntimeConfig`
+2. build and initialize the configured `WorkflowStore`
+3. construct `AuditService` and `RequestService`
+4. build optional `RequestInputAssistant` and `AgentMemoryService`
+5. construct `RequestCoordinator`
+6. construct `TelegramAdapter`
+7. register approver and requester notification callbacks back into the coordinator
+
+At runtime, `handle_invocation` acts as the API-facing dispatcher:
+
+- `request_message` goes to `RequestCoordinator.handle_requester_message`
+- approver operations (`approve`, `reject`, `needinfo`, `cancel`) go to `handle_approver_action`
+- `resubmit`, `lookup`, `history`, `my_pending`, and `pending_approvals` route to their dedicated coordinator methods
+- a small alias map normalizes external operation names such as `need_info` and `show_request` before enum parsing
+
+## Request Flow Routing
+
+Inbound requester text goes through these stages inside `RequestCoordinator`:
+
+1. explicit draft commands such as `confirm` and `discard`
+2. freeform management intent routing via `FreeformIntentRouter`
+3. fast-path pattern parsing for new requests
+4. contextual resubmission if the user is in a `needs_info` loop
+5. optional AI assistance if rule-based parsing did not resolve the message
+
+This ordering keeps common workflow operations deterministic and cheap, while still allowing AI assistance for ambiguous or incomplete requests.
 
 ## In-Memory State and Caching
 
@@ -125,13 +162,26 @@ The LLM client reuses a single `httpx.Client` instance across calls for TCP conn
 - not suited for high write volume or multi-replica concurrency
 - activate with `persistence.backend: google_sheets`
 
+## Key Record Sets
+
+At a high level, the persistence layer stores:
+
+- `requests` for the canonical request state
+- `audit_events` for the timeline and actor trail
+- `request_conversations` for linking requests to channel-specific conversation context
+- `chat_registry` for Telegram handle-to-chat resolution
+- `pending_drafts` and `pending_resubmit` for workflow state that survives restarts
+- `user_profiles` for Google-authenticated web users in the Postgres backend
+
+For field-level details, see [Data Model Audit](../product-spec/data-model-audit.md).
+
 ## Telegram Mode
 
 | | Polling (local dev) | Webhook (production) |
 | --- | --- | --- |
 | Portability | Runs anywhere | Requires `GREENNODE_ENDPOINT_URL` |
 | Scale-to-zero | No | Yes |
-| State survival on restart | Yes — Google Sheets write-through | Yes — Google Sheets write-through |
+| State survival on restart | Yes — persisted through the configured backing store | Yes — persisted through the configured backing store |
 | Per-invocation observability | No | Yes |
 | Local debugging | Easy | Requires ngrok |
 
@@ -146,6 +196,18 @@ The web UI connects to `WS /ws/chat` and exchanges discriminated-union messages 
 **Server → Client:** `WsTypingMessage` (processing indicator), `WsDoneMessage` (response + optional `UiResponse`), `WsErrorMessage`.
 
 All message types are defined as Pydantic models in `agent/src/agent/contracts/ws.py`. The `WsContract` declaration object states which types belong to which direction. Handler coverage is enforced via `WsChatHandlerBase` (ABC) — `ChatWsHandler` in `agent/src/agent/web/chat_ws.py` implements one method per client message type.
+
+## Notification Routing Rules
+
+The system notifies both approvers and requesters, but channel choice depends on request origin and actor identity rather than a single global notifier.
+
+- approver notifications are fanned out to both channel-specific notifiers: Telegram and the web notification hub
+- requester notifications route by `origin_channel_id`
+- if `origin_channel_id` looks like an email address, the requester is treated as a web user and the web notification hub is used
+- otherwise, requester follow-up goes through the Telegram adapter
+- when the approver action is performed by the same web user who originally created the request, the coordinator skips the extra requester notification to avoid echoing the result back into the same active session
+
+This means maintainers should preserve `origin_channel_id` semantics when changing request creation or notification code. It is the key field that decides where follow-up messages go.
 
 ### WS Contract Pipeline
 
@@ -163,11 +225,24 @@ frontend/src/lib/generated/ws-contract.ts   (TypeScript interfaces, JSDoc from d
 
 Run `make contracts` any time the Python models change. Never edit `asyncapi.yaml` or `ws-contract.ts` by hand.
 
-## AgentBase Migration Status
+## Code Map
 
-| Phase | Work | Status |
-| --- | --- | --- |
-| 1 — Externalize state | `_pending_drafts`, `_pending_resubmit`, `_chat_registry` → Google Sheets write-through cache | ✓ Done |
-| 2 — Webhook | `/telegram-webhook` route, `setWebhook` via `GREENNODE_ENDPOINT_URL` | ✓ Done |
-| 3 — Concurrent LLM | `ThreadPoolExecutor` for `classify_intent` + `assist_request_text` in parallel | ✓ Done |
-| 4 — Identity Service | Move secrets from `deploy.env` to AgentBase Identity | Blocked — Identity Service not yet accessible |
+The source tree is organized by responsibility rather than framework layer:
+
+- `agent/src/agent/adapters/` — Telegram-specific transport and command handling
+- `agent/src/agent/ai/` — LLM client, prompts, and assisted parsing/summary helpers
+- `agent/src/agent/contracts/` — typed WS contract definitions shared with the frontend
+- `agent/src/agent/domain/` — enums and core workflow data models
+- `agent/src/agent/parsing/` — rule-based request parsing and freeform intent routing
+- `agent/src/agent/persistence/` — storage abstraction plus Postgres and Google Sheets implementations
+- `agent/src/agent/services/` — request mutation, audit, transitions, and read/query services
+- `agent/src/agent/web/` — auth, web routes, session handling, WebSocket plumbing, browser notifications
+- `frontend/src/components/chat/` — main chat UI building blocks
+- `frontend/src/hooks/` — session and WebSocket client behavior
+- `frontend/src/lib/` — UI response shaping, formatting, diff helpers, generated contract bindings
+
+## Notes
+
+- Postgres is the default persistence backend.
+- Google Sheets remains available as a simpler legacy fallback.
+- The web UI reuses the same workflow core instead of creating a separate approval path.
